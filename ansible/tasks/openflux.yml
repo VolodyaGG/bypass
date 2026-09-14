@@ -1,0 +1,142 @@
+---
+# OpenFlux exit-node deployment.
+#
+# Upstream: https://github.com/p1neappleXpress/OpenFlux
+# The binary is built from source on the VPS (README documents only
+# the `go build` path; no prebuilt Linux releases are mentioned).
+#
+# Scope of this task:
+#   * install Go toolchain (if missing);
+#   * clone the repo at a pinned commit/tag;
+#   * build `universal-bypass-tool`;
+#   * write the AES-256 key (if configured) to /etc/vpnforge/openflux.key;
+#   * install & start the systemd unit;
+#   * print recent logs so the controller can pick up the session
+#     (only meaningful for transport=cupsonline).
+#
+# NOT implemented (documented gaps in upstream README):
+#   * raw mode requires a "scoped RST-drop iptables rule" whose exact
+#     syntax is not specified upstream. We refuse to guess.
+#     If you need raw, pre-configure iptables on the VPS manually
+#     and set `openflux.mode: raw` + `openflux.local_ip`.
+#   * Docker runtime — upstream has a Dockerfile/compose, but no
+#     usage docs. Native only for now.
+
+- name: Check if go is installed
+  ansible.builtin.command: go version
+  register: go_check
+  failed_when: false
+  changed_when: false
+
+- name: Install Go toolchain
+  when: go_check.rc != 0
+  block:
+    - name: Download Go tarball
+      ansible.builtin.get_url:
+        url: "https://go.dev/dl/go1.22.6.linux-amd64.tar.gz"
+        dest: /tmp/go.tar.gz
+        mode: "0644"
+
+    - name: Extract Go to /usr/local
+      ansible.builtin.unarchive:
+        src: /tmp/go.tar.gz
+        dest: /usr/local
+        remote_src: true
+        creates: /usr/local/go/bin/go
+
+    - name: Symlink go into /usr/local/bin
+      ansible.builtin.file:
+        src: /usr/local/go/bin/go
+        dest: /usr/local/bin/go
+        state: link
+
+- name: Ensure build tools are present
+  ansible.builtin.apt:
+    name:
+      - git
+      - ca-certificates
+    state: present
+    update_cache: true
+
+- name: Create OpenFlux build directory
+  ansible.builtin.file:
+    path: /opt/openflux-src
+    state: directory
+    mode: "0755"
+
+# Repo has no tagged releases; pin to a known commit at deploy time.
+# Update the commit hash when you upgrade OpenFlux.
+- name: Fetch OpenFlux sources
+  ansible.builtin.git:
+    repo: https://github.com/p1neappleXpress/OpenFlux.git
+    dest: /opt/openflux-src
+    version: HEAD
+    update: true
+    force: true
+
+- name: Build universal-bypass-tool
+  ansible.builtin.shell: |
+    set -e
+    cd /opt/openflux-src
+    export PATH=/usr/local/go/bin:$PATH
+    go mod tidy
+    go build -o /usr/local/bin/universal-bypass-tool .
+  args:
+    creates: /usr/local/bin/universal-bypass-tool
+
+- name: Ensure /etc/vpnforge exists
+  ansible.builtin.file:
+    path: /etc/vpnforge
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write OpenFlux encryption key
+  ansible.builtin.copy:
+    content: "{{ openflux.encryption_key }}\n"
+    dest: /etc/vpnforge/openflux.key
+    owner: root
+    group: root
+    mode: "0600"
+  when: openflux.encryption_key is defined and openflux.encryption_key
+  no_log: true
+
+- name: Install OpenFlux systemd unit
+  ansible.builtin.template:
+    src: templates/openflux.service.j2
+    dest: /etc/systemd/system/vpnforge-openflux.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: openflux_unit
+  notify: reload systemd
+
+- name: Enable and start OpenFlux
+  ansible.builtin.systemd:
+    name: vpnforge-openflux
+    enabled: true
+    state: restarted
+    daemon_reload: "{{ openflux_unit.changed }}"
+
+- name: Wait for OpenFlux to emit a session marker
+  when: openflux.transport == 'cupsonline'
+  ansible.builtin.shell: |
+    for i in $(seq 1 15); do
+      if journalctl -u vpnforge-openflux -n 200 --no-pager \
+          | grep -q "COPY THIS TO CLIENT"; then
+        exit 0
+      fi
+      sleep 2
+    done
+  changed_when: false
+
+- name: Dump OpenFlux logs for session pickup
+  ansible.builtin.shell: journalctl -u vpnforge-openflux -n 200 --no-pager
+  register: openflux_logs
+  changed_when: false
+  no_log: false
+
+- name: Print OpenFlux logs
+  ansible.builtin.debug:
+    msg: "{{ openflux_logs.stdout_lines }}"
