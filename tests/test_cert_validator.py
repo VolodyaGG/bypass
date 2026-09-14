@@ -21,10 +21,11 @@ from vpnforge.cert_validator import (
     check_validity,
     parse_fullchain,
     parse_privkey,
+    validate_cert_bytes,
+    validate_cert_pair,
     verify_pair,
 )
 from vpnforge.models import CertInfo
-
 
 # ---------- helpers to build certs ----------
 
@@ -78,7 +79,7 @@ def _write_key(path: Path, key: ec.EllipticCurvePrivateKey) -> None:
 
 @pytest.fixture()
 def now() -> dt.datetime:
-    return dt.datetime(2026, 9, 14, 12, 0, 0, tzinfo=dt.timezone.utc)
+    return dt.datetime(2026, 9, 14, 12, 0, 0, tzinfo=dt.UTC)
 
 
 @pytest.fixture()
@@ -327,3 +328,19 @@ def test_validity_naive_now_treated_as_utc(now: dt.datetime) -> None:
     info = _info("x", ["x"], now)
     naive = now.replace(tzinfo=None)
     check_validity(info, now=naive)
+
+
+def test_validate_cert_pair_ok(valid_cert: tuple[Path, Path]) -> None:
+    fullchain, privkey = valid_cert
+    with freeze_time("2026-09-14T12:00:00Z"):
+        info = validate_cert_pair(fullchain, privkey, "node1.example.com")
+    assert info.subject_cn == "node1.example.com"
+
+
+def test_validate_cert_bytes_ok(valid_cert: tuple[Path, Path]) -> None:
+    fullchain, privkey = valid_cert
+    with freeze_time("2026-09-14T12:00:00Z"):
+        info = validate_cert_bytes(
+            fullchain.read_bytes(), privkey.read_bytes(), "node1.example.com"
+        )
+    assert info.sha256

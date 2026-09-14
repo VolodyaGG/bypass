@@ -10,7 +10,8 @@ import os
 import re
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -39,15 +40,13 @@ class SecretsStore:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         # Best-effort: directory itself only accessible to owner.
-        try:
+        with suppress(OSError):
             os.chmod(self.root, 0o700)
-        except OSError:
-            pass
 
     # ---------- paths ----------
 
     def _path_for(self, ip: str) -> Path:
-        if not ip or not _IP_RE.match(ip):
+        if not ip or ip in {".", ".."} or not _IP_RE.match(ip):
             raise SecretsInvalid(f"invalid ip/host identifier: {ip!r}")
         return self.root / f"{ip}.json"
 
@@ -55,6 +54,17 @@ class SecretsStore:
 
     def exists(self, ip: str) -> bool:
         return self._path_for(ip).is_file()
+
+    def list_ips(self) -> list[str]:
+        """Return IPs that have a secrets file (excludes archive)."""
+        ips: list[str] = []
+        if not self.root.is_dir():
+            return ips
+        for path in sorted(self.root.glob("*.json")):
+            if path.name.startswith("."):
+                continue
+            ips.append(path.stem)
+        return ips
 
     def load(self, ip: str) -> Secrets:
         path = self._path_for(ip)
@@ -74,7 +84,7 @@ class SecretsStore:
             raise SecretsInvalid(f"schema mismatch in {path}: {exc}") from exc
 
     def save(self, secrets: Secrets) -> None:
-        secrets.updated_at = datetime.now(timezone.utc)
+        secrets.updated_at = datetime.now(UTC)
         path = self._path_for(secrets.ip)
 
         payload = secrets.model_dump(mode="json")
@@ -109,18 +119,14 @@ class SecretsStore:
 
         archive_dir = self.root / "_archive"
         archive_dir.mkdir(parents=True, exist_ok=True)
-        try:
+        with suppress(OSError):
             os.chmod(archive_dir, 0o700)
-        except OSError:
-            pass
 
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         dest = archive_dir / f"{ip}.{ts}.json"
         shutil.move(str(path), str(dest))
-        try:
+        with suppress(OSError):
             os.chmod(dest, 0o600)
-        except OSError:
-            pass
         return dest
 
     def export(self, ip: str) -> bytes:
@@ -159,17 +165,13 @@ class SecretsStore:
 
         archive_dir = self.root / "_archive"
         archive_dir.mkdir(parents=True, exist_ok=True)
-        try:
+        with suppress(OSError):
             os.chmod(archive_dir, 0o700)
-        except OSError:
-            pass
 
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         suffix = f".{tag}" if tag else ""
         dest = archive_dir / f"{ip}.{ts}{suffix}.json"
         shutil.copy2(path, dest)
-        try:
+        with suppress(OSError):
             os.chmod(dest, 0o600)
-        except OSError:
-            pass
         return dest

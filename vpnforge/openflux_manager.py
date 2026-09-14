@@ -30,8 +30,9 @@ import base64
 import binascii
 import logging
 import re
+from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable
+from typing import Any
 
 from vpnforge.ansible_runner import AnsibleRun, AnsibleRunner
 from vpnforge.models import Secrets
@@ -193,7 +194,9 @@ def _is_valid_b64(s: str) -> bool:
         raw = base64.b64decode(s, validate=True)
     except (binascii.Error, ValueError):
         return False
-    return len(raw) >= MIN_SESSION_BYTES
+    if len(raw) < MIN_SESSION_BYTES:
+        return False
+    return len(set(raw)) > 1
 
 
 # ---------- deploy ----------
@@ -293,7 +296,7 @@ async def fetch_session_with_retry(
     for attempt in range(1, retries + 1):
         try:
             text = await fetch_logs()
-        except Exception as exc:  # noqa: BLE001 — deliberately broad
+        except Exception as exc:
             last_error = exc
             logger.warning("openflux fetch attempt %d failed: %s", attempt, exc)
         else:

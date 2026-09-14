@@ -20,7 +20,6 @@ from vpnforge.models import (
     Secrets,
 )
 
-
 # ---------- fixtures / builders ----------
 
 

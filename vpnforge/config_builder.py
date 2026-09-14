@@ -102,7 +102,12 @@ def _xray_email(label: str, client_id: str) -> str:
         ch if (ch.isalnum() and ch.isascii()) else "-" for ch in label.lower()
     ).strip("-") or "client"
     local = local[:24]
-    return f"{local}@{client_id[:8]}"
+    suffix = "".join(
+        ch if ch.isascii() and (ch.isalnum() or ch == "-") else ""
+        for ch in client_id.lower()
+    )
+    suffix = suffix.strip("-")[:8] or "client"
+    return f"{local}@{suffix}"
 
 
 # ---------- Hysteria 2 ----------

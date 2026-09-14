@@ -1,0 +1,27 @@
+---
+- name: Check native units
+  when: vpnforge.runtime == "native"
+  block:
+    - name: Xray is active
+      ansible.builtin.command: systemctl is-active vpnforge-xray
+      changed_when: false
+      when: protocols.vless_reality | default(false)
+
+    - name: Hysteria is active
+      ansible.builtin.command: systemctl is-active vpnforge-hysteria
+      changed_when: false
+      when: protocols.hysteria2 | default(false)
+
+    - name: Sub-server is active
+      ansible.builtin.command: systemctl is-active vpnforge-sub
+      changed_when: false
+
+    - name: OpenFlux is active
+      ansible.builtin.command: systemctl is-active vpnforge-openflux
+      changed_when: false
+      when: protocols.openflux | default(false)
+
+- name: Check docker compose
+  when: vpnforge.runtime == "docker"
+  ansible.builtin.command: docker compose -f /opt/vpnforge/docker-compose.yml ps
+  changed_when: false

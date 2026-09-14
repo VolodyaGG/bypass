@@ -1,0 +1,38 @@
+---
+- name: Ensure vpnforge directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /opt/vpnforge
+    - /etc/vpnforge
+    - /etc/vpnforge/certs
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - unzip
+      - python3
+      - python3-venv
+      - python3-pip
+    state: present
+    update_cache: true
+
+- name: Install BBR sysctl
+  ansible.builtin.template:
+    src: templates/sysctl-bbr.conf.j2
+    dest: /etc/sysctl.d/99-vpnforge-bbr.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: bbr_sysctl
+
+- name: Apply sysctl
+  ansible.builtin.command: sysctl --system
+  when: bbr_sysctl.changed
+  changed_when: true

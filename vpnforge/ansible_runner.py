@@ -11,8 +11,10 @@ import json
 import logging
 import os
 import shutil
+from collections.abc import AsyncIterator
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,7 @@ class AnsibleRun:
         timeout: float,
     ) -> None:
         self._proc = proc
-        self._timeout = timeout
+        self._timeout = max(timeout, 1.0)
         self.returncode: int | None = None
         self.timed_out: bool = False
         self._finished: bool = False
@@ -85,7 +87,7 @@ class AnsibleRun:
                     raw = await asyncio.wait_for(
                         self._proc.stdout.readline(), timeout=remaining
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     await self._kill_and_mark_timeout()
                     return
 
@@ -102,7 +104,7 @@ class AnsibleRun:
             # Wait for exit (should be immediate after EOF, but be safe).
             try:
                 await asyncio.wait_for(self._proc.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await self._kill_and_mark_timeout()
                 return
 
@@ -114,14 +116,17 @@ class AnsibleRun:
 
     async def _kill_and_mark_timeout(self) -> None:
         if self._proc.returncode is None:
-            try:
+            with suppress(ProcessLookupError):
                 self._proc.kill()
-            except ProcessLookupError:
-                pass
             await self._proc.wait()
         self.returncode = self._proc.returncode
         self.timed_out = True
         logger.warning("ansible-playbook killed (timeout or early exit)")
+
+    async def aclose(self) -> None:
+        """Stop the underlying process when a consumer exits early."""
+        if self.returncode is None:
+            await self._kill_and_mark_timeout()
 
     @property
     def tail(self) -> str:
@@ -153,6 +158,9 @@ class AnsibleRunner:
         env["ANSIBLE_FORCE_COLOR"] = "0"
         env["ANSIBLE_NOCOLOR"] = "1"
         env["PYTHONUNBUFFERED"] = "1"
+        cfg = self._root / "ansible" / "ansible.cfg"
+        if cfg.is_file():
+            env["ANSIBLE_CONFIG"] = str(cfg)
         return env
 
     def _build_argv(

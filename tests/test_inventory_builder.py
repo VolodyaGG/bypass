@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -28,18 +28,17 @@ from vpnforge.models import (
 )
 from vpnforge.openflux_manager import OpenFluxError
 
-
 # ---------- fixtures ----------
 
 
 def _vps(**overrides) -> VPSConnection:
-    base = dict(
-        ip="1.2.3.4",
-        ssh_user="root",
-        ssh_port=22,
-        ssh_private_key_path="/home/user/.ssh/vps_key",
-        ssh_password=None,
-    )
+    base = {
+        "ip": "1.2.3.4",
+        "ssh_user": "root",
+        "ssh_port": 22,
+        "ssh_private_key_path": "/home/user/.ssh/vps_key",
+        "ssh_password": None,
+    }
     base.update(overrides)
     return VPSConnection(**base)
 
@@ -62,8 +61,8 @@ def _cert() -> CertInfo:
     return CertInfo(
         subject_cn="node1.example.com",
         san_domains=["node1.example.com"],
-        not_before=datetime(2026, 9, 1, tzinfo=timezone.utc),
-        not_after=datetime(2026, 12, 1, tzinfo=timezone.utc),
+        not_before=datetime(2026, 9, 1, tzinfo=UTC),
+        not_after=datetime(2026, 12, 1, tzinfo=UTC),
         issuer_cn="R3",
         sha256="deadbeef" * 8,
     )
@@ -567,3 +566,16 @@ def test_golden_gv_openflux_only() -> None:
         "--mode",
         "proxy",
     ]
+
+
+def test_gv_includes_optional_configs() -> None:
+    gv = build_group_vars(
+        _secrets(with_hysteria=False),
+        cert=None,
+        xray_config={"log": {"loglevel": "warning"}},
+        hysteria_config={"listen": ":443"},
+        clients_json={"version": 1, "clients": []},
+    )
+    assert gv["xray_config"]["log"]["loglevel"] == "warning"
+    assert gv["hysteria_config"]["listen"] == ":443"
+    assert gv["clients_json"]["version"] == 1

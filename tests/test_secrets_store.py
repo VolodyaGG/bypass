@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
 from pathlib import Path
 
@@ -268,6 +267,14 @@ def test_updated_at_bumps_on_second_save(tmp_secrets_dir: Path) -> None:
     with freeze_time("2026-09-14T12:05:00Z"):
         store.save(s)
         assert s.updated_at > first
+
+
+def test_list_ips(tmp_secrets_dir: Path) -> None:
+    store = SecretsStore(tmp_secrets_dir)
+    assert store.list_ips() == []
+    store.save(_make_secrets(ip="1.2.3.4"))
+    store.save(_make_secrets(ip="5.6.7.8"))
+    assert store.list_ips() == ["1.2.3.4", "5.6.7.8"]
 
 
 def test_snapshot_keeps_live_file(tmp_secrets_dir: Path) -> None:

@@ -10,12 +10,13 @@ We do NOT issue certificates — user uploads LE-issued files. We only:
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
+from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import ExtensionOID
 
 from vpnforge.models import CertInfo
@@ -143,12 +144,38 @@ def check_matches_domain(info: CertInfo, domain: str) -> bool:
     return True
 
 
+def validate_cert_pair(
+    fullchain: Path, privkey: Path, domain: str | None = None
+) -> CertInfo:
+    """Parse, match key, check validity, optionally check domain. Returns CertInfo."""
+    parse_privkey(privkey)
+    verify_pair(fullchain, privkey)
+    info = parse_fullchain(fullchain)
+    check_validity(info)
+    if domain:
+        check_matches_domain(info, domain)
+    return info
+
+
+def validate_cert_bytes(
+    fullchain: bytes, privkey: bytes, domain: str | None = None
+) -> CertInfo:
+    """Same as validate_cert_pair, from in-memory PEM bytes."""
+    with tempfile.TemporaryDirectory(prefix="vpnforge-cert-") as tmp:
+        td = Path(tmp)
+        fc = td / "fullchain.pem"
+        pk = td / "privkey.pem"
+        fc.write_bytes(fullchain)
+        pk.write_bytes(privkey)
+        return validate_cert_pair(fc, pk, domain)
+
+
 def check_validity(info: CertInfo, now: datetime | None = None) -> None:
     """Raise CertExpired if now is outside [not_before, not_after)."""
     if now is None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
     if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
 
     if now < info.not_before:
         raise CertExpired(
@@ -197,7 +224,7 @@ def _keys_match(pub_a: object, pub_b: object) -> bool:
         )
     except AttributeError:
         return False
-    return a == b
+    return cast(bool, a == b)
 
 
 def _domain_matches(domain: str, pattern: str) -> bool:

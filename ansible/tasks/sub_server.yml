@@ -1,0 +1,57 @@
+---
+- name: Ensure sub-server directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /opt/vpnforge/sub
+
+- name: Write clients.json
+  ansible.builtin.copy:
+    content: "{{ clients_json | to_nice_json }}"
+    dest: "{{ vpnforge.clients_json_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart sub
+
+- name: Copy sub-server application
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../vpnforge/vps_sub_server/"
+    dest: /opt/vpnforge/sub/
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create sub-server venv
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/vpnforge/sub/.venv
+    creates: /opt/vpnforge/sub/.venv/bin/python
+
+- name: Install sub-server requirements
+  ansible.builtin.pip:
+    requirements: /opt/vpnforge/sub/requirements.txt
+    virtualenv: /opt/vpnforge/sub/.venv
+
+- name: Install sub-server systemd unit
+  when: vpnforge.runtime == "native"
+  ansible.builtin.template:
+    src: templates/vpnforge-sub.service.j2
+    dest: /etc/systemd/system/vpnforge-sub.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart sub
+
+- name: Enable sub-server
+  when: vpnforge.runtime == "native"
+  ansible.builtin.systemd:
+    name: vpnforge-sub
+    enabled: true
+    state: started
+    daemon_reload: true

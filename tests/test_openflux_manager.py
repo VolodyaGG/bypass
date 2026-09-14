@@ -19,7 +19,6 @@ from vpnforge.openflux_manager import (
     MARKER,
     OPENFLUX_BIN,
     OPENFLUX_KEY_PATH,
-    OpenFluxDeploy,
     OpenFluxDeployFailed,
     OpenFluxError,
     build_exit_node_argv,
@@ -29,7 +28,6 @@ from vpnforge.openflux_manager import (
     run_openflux_deploy,
 )
 from vpnforge.secrets_store import SecretsStore
-
 
 # ---------- helpers ----------
 

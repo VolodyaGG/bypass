@@ -10,14 +10,11 @@ from pathlib import Path
 import pytest
 
 from vpnforge.ansible_runner import (
-    DEFAULT_TIMEOUT,
     AnsibleError,
     AnsibleNotFound,
-    AnsibleRun,
     AnsibleRunError,
     AnsibleRunner,
 )
-
 
 # ---------- helpers ----------
 
@@ -185,7 +182,32 @@ async def test_run_passes_extra_vars_file(tmp_path: Path) -> None:
     assert f"@{evf}" in joined
 
 
+async def test_run_sets_ansible_config_when_present(tmp_path: Path) -> None:
+    cfg_dir = tmp_path / "ansible"
+    cfg_dir.mkdir()
+    (cfg_dir / "ansible.cfg").write_text("[defaults]\n", encoding="utf-8")
+    bin_path = _make_fake_bin(tmp_path, 'echo "$ANSIBLE_CONFIG"\nexit 0\n')
+    runner = AnsibleRunner(tmp_path, ansible_bin=str(bin_path))
+    playbook = _touch(tmp_path / "play.yml")
+    inventory = _touch(tmp_path / "hosts.ini")
+
+    run = await runner.run(playbook, inventory)
+    lines = [line async for line in run]
+    assert lines == [str(cfg_dir / "ansible.cfg")]
+
+
 async def test_run_sets_ansible_env_vars(tmp_path: Path) -> None:
+    bin_path = _make_fake_bin(
+        tmp_path,
+        'echo "$ANSIBLE_FORCE_COLOR|$ANSIBLE_NOCOLOR|$PYTHONUNBUFFERED"\nexit 0\n',
+    )
+    runner = AnsibleRunner(tmp_path, ansible_bin=str(bin_path))
+    playbook = _touch(tmp_path / "play.yml")
+    inventory = _touch(tmp_path / "hosts.ini")
+
+    run = await runner.run(playbook, inventory)
+    lines = [line async for line in run]
+    assert lines == ["0|1|1"]
     bin_path = _make_fake_bin(
         tmp_path,
         'echo "$ANSIBLE_FORCE_COLOR|$ANSIBLE_NOCOLOR|$PYTHONUNBUFFERED"\nexit 0\n',
@@ -265,6 +287,7 @@ async def test_early_break_kills_process(tmp_path: Path) -> None:
         if line == "one":
             break
 
+    await run.aclose()
     assert seen == ["one"]
     # Process killed due to early break
     assert run.timed_out is True

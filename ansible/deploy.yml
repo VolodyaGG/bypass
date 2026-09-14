@@ -1,0 +1,70 @@
+---
+- name: VPN-Forge deploy
+  hosts: vpn
+  become: true
+  gather_facts: true
+  handlers:
+    - name: reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: restart xray
+      ansible.builtin.systemd:
+        name: vpnforge-xray
+        state: restarted
+
+    - name: reload hysteria
+      ansible.builtin.systemd:
+        name: vpnforge-hysteria
+        state: reloaded
+
+    - name: restart hysteria
+      ansible.builtin.systemd:
+        name: vpnforge-hysteria
+        state: restarted
+
+    - name: restart sub
+      ansible.builtin.systemd:
+        name: vpnforge-sub
+        state: restarted
+
+    - name: restart openflux
+      ansible.builtin.systemd:
+        name: vpnforge-openflux
+        state: restarted
+
+    - name: restart compose
+      when: vpnforge.runtime == "docker"
+      ansible.builtin.command:
+        cmd: docker compose -f /opt/vpnforge/docker-compose.yml up -d --remove-orphans
+      changed_when: true
+
+  tasks:
+    - name: Base system
+      ansible.builtin.import_tasks: tasks/base.yml
+
+    - name: Native runtime
+      ansible.builtin.import_tasks: tasks/native.yml
+      when: vpnforge.runtime == "native"
+
+    - name: Docker runtime
+      ansible.builtin.import_tasks: tasks/docker.yml
+      when: vpnforge.runtime == "docker"
+
+    - name: Hysteria 2
+      ansible.builtin.import_tasks: tasks/hysteria.yml
+      when: protocols.hysteria2 | default(false)
+
+    - name: Xray Reality
+      ansible.builtin.import_tasks: tasks/xray.yml
+      when: protocols.vless_reality | default(false)
+
+    - name: OpenFlux
+      ansible.builtin.import_tasks: tasks/openflux.yml
+      when: protocols.openflux | default(false)
+
+    - name: Subscription server
+      ansible.builtin.import_tasks: tasks/sub_server.yml
+
+    - name: Verify services
+      ansible.builtin.import_tasks: tasks/verify.yml

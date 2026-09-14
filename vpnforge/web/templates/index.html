@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN-Forge v0.1.0</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@0.469.0"></script>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+</head>
+<body class="bg-base text-text font-mono antialiased">
+    <div id="app" class="min-h-screen flex flex-col">
+        <!-- Header -->
+        <header class="border-b border-subtle bg-panel px-6 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <span class="text-xl">🔨</span>
+                <span class="font-bold text-lg">VPN-FORGE v0.1.0</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <button id="status-btn" class="flex items-center gap-2 text-sm text-muted hover:text-accent transition-colors">
+                    <span id="status-dot" class="text-dim">●</span>
+                    <span>status</span>
+                </button>
+                <button class="text-muted hover:text-accent transition-colors">
+                    <i data-lucide="help-circle" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="flex-1 max-w-5xl mx-auto w-full p-6 space-y-6">
+            <!-- PROTOCOLS Section -->
+            <section id="section-protocols" class="panel fade-in">
+                <div class="panel-header">
+                    <span class="text-accent">▸</span>
+                    <span>PROTOCOLS</span>
+                </div>
+                <div class="panel-content space-y-3">
+                    <label class="radio-group">
+                        <input type="checkbox" id="proto-hysteria2" data-field="protocols.hysteria2">
+                        <span class="radio-indicator"></span>
+                        <span class="radio-label">Hysteria 2</span>
+                        <span class="radio-desc">UDP/443, real TLS</span>
+                    </label>
+                    <label class="radio-group">
+                        <input type="checkbox" id="proto-vless" data-field="protocols.vless_reality">
+                        <span class="radio-indicator"></span>
+                        <span class="radio-label">VLESS Reality</span>
+                        <span class="radio-desc">TCP/443, xHTTP packet-up</span>
+                    </label>
+                    <label class="radio-group">
+                        <input type="checkbox" id="proto-openflux" data-field="protocols.openflux">
+                        <span class="radio-indicator"></span>
+                        <span class="radio-label">OpenFlux</span>
+                        <span class="radio-desc">separate client, tunnel</span>
+                    </label>
+                </div>
+            </section>
+
+            <!-- VPS Section -->
+            <section id="section-vps" class="panel fade-in">
+                <div class="panel-header">
+                    <span class="text-accent">▸</span>
+                    <span>VPS</span>
+                </div>
+                <div class="panel-content space-y-4">
+                    <div class="input-group">
+                        <label class="input-label">IP</label>
+                        <div class="input-wrapper">
+                            <span class="input-prefix">></span>
+                            <input type="text" id="vps-ip" data-field="vps.ip" placeholder="1.2.3.4" class="input-field">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Port</label>
+                        <div class="input-wrapper">
+                            <span class="input-prefix">></span>
+                            <input type="number" id="vps-port" data-field="vps.port" value="22" class="input-field">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">User</label>
+                        <div class="input-wrapper">
+                            <span class="input-prefix">></span>
+                            <input type="text" id="vps-user" data-field="vps.user" value="root" class="input-field">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Auth</label>
+                        <div class="radio-group-inline">
+                            <label class="radio-group">
+                                <input type="radio" name="auth" value="key" data-field="vps.auth" checked>
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">SSH key</span>
+                            </label>
+                            <label class="radio-group">
+                                <input type="radio" name="auth" value="password" data-field="vps.auth">
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">Password</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="input-group" id="key-path-group">
+                        <label class="input-label">Key path</label>
+                        <div class="input-wrapper">
+                            <span class="input-prefix">></span>
+                            <input type="text" id="vps-keypath" data-field="vps.keyPath" placeholder="~/.ssh/id_ed25519" class="input-field">
+                        </div>
+                    </div>
+                    <div class="input-group hidden" id="password-group">
+                        <label class="input-label">Password</label>
+                        <div class="input-wrapper">
+                            <span class="input-prefix">></span>
+                            <input type="password" id="vps-password" data-field="vps.password" placeholder="••••••••" class="input-field">
+                            <button type="button" class="password-toggle" data-target="vps-password">
+                                <i data-lucide="eye" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Runtime</label>
+                        <div class="radio-group-inline">
+                            <label class="radio-group">
+                                <input type="radio" name="runtime" value="native" data-field="vps.runtime" checked>
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">native</span>
+                            </label>
+                            <label class="radio-group">
+                                <input type="radio" name="runtime" value="docker" data-field="vps.runtime">
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">docker</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- DNS & CERTS Section -->
+            <section id="section-dns" class="panel fade-in hidden">
+                <div class="panel-header">
+                    <span class="text-accent">▸</span>
+                    <span>DNS & CERTS</span>
+                </div>
+                <div class="panel-content space-y-4">
+                    <div class="input-group">
+                        <label class="input-label">CF Token</label>
+                        <div class="input-wrapper">
+                            <span class="input-prefix">></span>
+                            <input type="password" id="dns-cftoken" data-field="dns.cfToken" placeholder="••••••••••••••••" class="input-field">
+                            <button type="button" class="password-toggle" data-target="dns-cftoken">
+                                <i data-lucide="eye" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Root</label>
+                        <div class="input-wrapper">
+                            <span class="input-prefix">></span>
+                            <input type="text" id="dns-root" data-field="dns.root" placeholder="example.com" class="input-field">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Sub</label>
+                        <div class="input-wrapper">
+                            <span class="input-prefix">></span>
+                            <input type="text" id="dns-sub" data-field="dns.sub" placeholder="node1" class="input-field">
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Cert</label>
+                        <div class="file-input-wrapper">
+                            <button type="button" class="file-select-btn" data-target="cert-file">
+                                [ select fullchain.pem ]
+                            </button>
+                            <input type="file" id="cert-file" accept=".pem,.crt" class="hidden">
+                            <span id="cert-status" class="file-status"></span>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">Key</label>
+                        <div class="file-input-wrapper">
+                            <button type="button" class="file-select-btn" data-target="key-file">
+                                [ select privkey.pem ]
+                            </button>
+                            <input type="file" id="key-file" accept=".pem,.key" class="hidden">
+                            <span id="key-status" class="file-status"></span>
+                        </div>
+                        <button type="button" id="validate-cert-btn" class="validate-btn mt-2">
+                            [ ✓ validate ]
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- OPENFLUX Section -->
+            <section id="section-openflux" class="panel fade-in hidden">
+                <div class="panel-header">
+                    <span class="text-accent">▸</span>
+                    <span>OPENFLUX</span>
+                </div>
+                <div class="panel-content space-y-4">
+                    <div class="input-group">
+                        <label class="input-label">Transport</label>
+                        <div class="radio-group-inline">
+                            <label class="radio-group">
+                                <input type="radio" name="transport" value="cupsonline" data-field="openflux.transport">
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">cupsonline</span>
+                            </label>
+                            <label class="radio-group">
+                                <input type="radio" name="transport" value="yandex" data-field="openflux.transport">
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">yandex</span>
+                            </label>
+                            <label class="radio-group">
+                                <input type="radio" name="transport" value="oneme" data-field="openflux.transport">
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">oneme</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="input-group hidden" id="yandex-url-group">
+                        <label class="input-label">Yandex URL</label>
+                        <div class="input-wrapper">
+                            <span class="input-prefix">></span>
+                            <input type="text" id="openflux-yandex" data-field="openflux.yandexUrl" placeholder="https://..." class="input-field">
+                        </div>
+                    </div>
+                    <div class="input-group hidden" id="oneme-group">
+                        <div class="input-group">
+                            <label class="input-label">Max Token</label>
+                            <div class="input-wrapper">
+                                <span class="input-prefix">></span>
+                                <input type="text" id="openflux-maxtoken" data-field="openflux.maxToken" placeholder="" class="input-field">
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Max UID</label>
+                            <div class="input-wrapper">
+                                <span class="input-prefix">></span>
+                                <input type="text" id="openflux-maxuid" data-field="openflux.maxUid" placeholder="" class="input-field">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CLIENTS Section -->
+            <section id="section-clients" class="panel fade-in hidden">
+                <div class="panel-header">
+                    <span class="text-accent">▸</span>
+                    <span>CLIENTS</span>
+                </div>
+                <div class="panel-content">
+                    <div id="clients-list" class="space-y-2">
+                        <!-- Clients will be rendered here -->
+                    </div>
+                    <button type="button" id="add-client-btn" class="secondary-btn mt-4">
+                        [ + add client ]
+                    </button>
+                </div>
+            </section>
+
+            <!-- SERVICES Section -->
+            <section id="section-services" class="panel fade-in hidden">
+                <div class="panel-header">
+                    <span class="text-accent">▸</span>
+                    <span>SERVICES</span>
+                </div>
+                <div class="panel-content">
+                    <div id="services-list" class="space-y-2">
+                        <!-- Services will be rendered here -->
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Bottom Panel -->
+        <footer class="border-t border-subtle bg-panel px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-muted">
+                <span>forge</span>
+                <span class="text-accent">></span>
+                <span class="animate-pulse">_</span>
+            </div>
+            <button type="button" id="forge-btn" class="forge-btn">
+                [▸ FORGE]
+            </button>
+        </footer>
+    </div>
+
+    <!-- Deployment Overlay -->
+    <div id="deploy-overlay" class="overlay hidden">
+        <div class="overlay-content">
+            <div class="overlay-header">
+                <div class="flex items-center gap-2">
+                    <span class="text-accent">▸</span>
+                    <span>DEPLOYMENT</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button type="button" id="copy-log-btn" class="icon-btn" title="Copy log">
+                        <i data-lucide="copy" class="w-4 h-4"></i>
+                    </button>
+                    <button type="button" id="download-log-btn" class="icon-btn" title="Download log">
+                        <i data-lucide="download" class="w-4 h-4"></i>
+                    </button>
+                    <button type="button" id="close-overlay-btn" class="icon-btn" title="Close">
+                        <i data-lucide="x" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Progress Stages -->
+            <div id="stages-bar" class="stages-bar">
+                <div class="stage" data-stage="apt">
+                    <span class="stage-icon">○</span>
+                    <span class="stage-name">apt</span>
+                </div>
+                <div class="stage" data-stage="runtime">
+                    <span class="stage-icon">○</span>
+                    <span class="stage-name">runtime</span>
+                </div>
+                <div class="stage" data-stage="xray">
+                    <span class="stage-icon">○</span>
+                    <span class="stage-name">xray</span>
+                </div>
+                <div class="stage" data-stage="hysteria">
+                    <span class="stage-icon">○</span>
+                    <span class="stage-name">hysteria</span>
+                </div>
+                <div class="stage" data-stage="sub">
+                    <span class="stage-icon">○</span>
+                    <span class="stage-name">sub</span>
+                </div>
+                <div class="stage" data-stage="verify">
+                    <span class="stage-icon">○</span>
+                    <span class="stage-name">verify</span>
+                </div>
+            </div>
+
+            <!-- Terminal -->
+            <div id="terminal" class="terminal">
+                <div id="log-container" class="log-container">
+                    <!-- Log lines will be rendered here -->
+                </div>
+            </div>
+
+            <div class="overlay-footer">
+                <button type="button" id="cancel-deploy-btn" class="secondary-btn">
+                    [ ▸ cancel ]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Add Client -->
+    <div id="add-client-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="text-accent">▸</span>
+                <span>Add client</span>
+                <button type="button" class="modal-close-btn" data-modal="add-client-modal">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label class="input-label">Label</label>
+                    <div class="input-wrapper">
+                        <span class="input-prefix">></span>
+                        <input type="text" id="new-client-label" placeholder="client name" class="input-field">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="secondary-btn modal-cancel-btn" data-modal="add-client-modal">
+                    [ cancel ]
+                </button>
+                <button type="button" id="confirm-add-client-btn" class="primary-btn">
+                    [ ▸ add ]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Rename Client -->
+    <div id="rename-client-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="text-accent">▸</span>
+                <span>Rename client</span>
+                <button type="button" class="modal-close-btn" data-modal="rename-client-modal">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label class="input-label">Label</label>
+                    <div class="input-wrapper">
+                        <span class="input-prefix">></span>
+                        <input type="text" id="rename-client-label" placeholder="new label" class="input-field">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="secondary-btn modal-cancel-btn" data-modal="rename-client-modal">
+                    [ cancel ]
+                </button>
+                <button type="button" id="confirm-rename-client-btn" class="primary-btn">
+                    [ ▸ rename ]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Delete Client -->
+    <div id="delete-client-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="text-accent">▸</span>
+                <span>Delete client</span>
+                <button type="button" class="modal-close-btn" data-modal="delete-client-modal">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted">Delete client <span id="delete-client-name" class="text-accent"></span>?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="secondary-btn modal-cancel-btn" data-modal="delete-client-modal">
+                    [ cancel ]
+                </button>
+                <button type="button" id="confirm-delete-client-btn" class="danger-btn">
+                    [ ▸ delete ]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: View Client Config -->
+    <div id="view-config-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="text-accent">▸</span>
+                <span>Client config</span>
+                <button type="button" class="modal-close-btn" data-modal="view-config-modal">
+                    <i data-lucide="x" class="w-4 h-4"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="config-urls" class="space-y-2 font-mono text-sm">
+                    <!-- URLs will be rendered here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" id="copy-config-btn" class="secondary-btn">
+                    [⎘ copy]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

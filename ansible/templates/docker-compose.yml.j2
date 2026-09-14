@@ -1,0 +1,46 @@
+services:
+{% if protocols.vless_reality %}
+  xray:
+    image: ghcr.io/xtls/xray-core:25.8.3
+    container_name: vpnforge-xray
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - /etc/vpnforge/xray.json:/etc/xray/config.json:ro
+    command: ["run", "-c", "/etc/xray/config.json"]
+{% endif %}
+{% if protocols.hysteria2 %}
+  hysteria:
+    image: tobi312/hysteria:2.6.1
+    container_name: vpnforge-hysteria
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - /etc/vpnforge/hysteria.yaml:/etc/hysteria.yaml:ro
+      - /etc/vpnforge/certs:/etc/vpnforge/certs:ro
+    command: ["server", "-c", "/etc/hysteria.yaml"]
+{% endif %}
+  sub:
+    image: python:3.11-slim
+    container_name: vpnforge-sub
+    network_mode: host
+    restart: unless-stopped
+    working_dir: /opt/vpnforge/sub
+    environment:
+      VPNFORGE_CLIENTS_FILE: "{{ vpnforge.clients_json_path }}"
+    volumes:
+      - /opt/vpnforge/sub:/opt/vpnforge/sub
+    command: >
+      sh -c "pip install -q -r /opt/vpnforge/sub/requirements.txt &&
+      python -m uvicorn app:app --host 0.0.0.0 --port 80"
+{% if protocols.openflux %}
+  openflux:
+    image: golang:1.22
+    container_name: vpnforge-openflux
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - /usr/local/bin/universal-bypass-tool:/usr/local/bin/universal-bypass-tool:ro
+      - /etc/vpnforge/openflux.key:/etc/vpnforge/openflux.key:ro
+    command: {{ openflux.argv | to_json }}
+{% endif %}

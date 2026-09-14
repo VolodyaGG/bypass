@@ -16,7 +16,7 @@ trivial and we never ship raw secret material in Jinja conditionals.
 from __future__ import annotations
 
 import base64
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -70,6 +70,9 @@ def build_group_vars(
     clients_json_path: str = "/opt/vpnforge/sub/clients.json",
     openflux_env: dict[str, str] | None = None,
     ssh_password: str | None = None,
+    xray_config: dict[str, Any] | None = None,
+    hysteria_config: dict[str, Any] | None = None,
+    clients_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble group_vars/all.yml as a dict.
 
@@ -164,6 +167,13 @@ def build_group_vars(
         # Only for the duration of one deploy; file is removed afterwards.
         gv["ansible_password"] = ssh_password
 
+    if xray_config is not None:
+        gv["xray_config"] = xray_config
+    if hysteria_config is not None:
+        gv["hysteria_config"] = hysteria_config
+    if clients_json is not None:
+        gv["clients_json"] = clients_json
+
     return gv
 
 
@@ -172,12 +182,13 @@ def build_group_vars(
 
 def dump_group_vars(gv: dict[str, Any]) -> str:
     """Deterministic YAML dump for golden tests and for writing to disk."""
-    return yaml.safe_dump(
+    dumped = yaml.safe_dump(
         gv,
         default_flow_style=False,
         allow_unicode=True,
         sort_keys=False,
     )
+    return cast(str, dumped)
 
 
 # ---------- small helpers for main.py ----------

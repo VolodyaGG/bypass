@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ---------- protocols ----------
@@ -161,3 +161,79 @@ class VPSConnection(BaseModel):
     ssh_port: int = 22
     ssh_private_key_path: str | None = None
     ssh_password: str | None = None
+
+
+RuntimeKind = Literal["native", "docker"]
+
+
+class ErrorBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    message: str
+
+
+class ErrorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    error: ErrorBody
+
+
+class DnsUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fqdn: str
+    ip: str
+    root_domain: str | None = None
+    zone_id: str | None = None
+    api_token: str | None = None
+
+
+class SecretsIpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ip: str
+
+
+class ClientCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ip: str
+    label: str
+
+
+class ClientPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ip: str
+    label: str | None = None
+    disabled: bool | None = None
+
+
+class ClientRotateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ip: str
+
+
+class DeployRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ip: str
+    ssh_user: str = "root"
+    ssh_port: int = 22
+    ssh_private_key_path: str | None = None
+    ssh_password: str | None = None
+    domain: str | None = None
+    root_domain: str | None = None
+    protocols: ProtocolFlags
+    runtime: RuntimeKind = "native"
+    openflux: OpenFluxConfig | None = None
+    cf_api_token: str | None = None
+
+    @field_validator("protocols")
+    @classmethod
+    def _at_least_one_protocol(cls, v: ProtocolFlags) -> ProtocolFlags:
+        if not (v.hysteria2 or v.vless_reality or v.openflux):
+            raise ValueError("at least one protocol must be enabled")
+        return v

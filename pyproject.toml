@@ -19,6 +19,7 @@ pydantic-settings = "^2.6"
 cryptography = "^43.0"
 python-multipart = "^0.0.12"
 sse-starlette = "^2.1"
+aiofiles = "^24.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3"
@@ -41,6 +42,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["B008", "N818", "RUF001"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -49,6 +51,10 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["poetry-core"]

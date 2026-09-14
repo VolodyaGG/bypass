@@ -15,7 +15,7 @@ Rules (from TZ §2, §4.5):
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from vpnforge import crypto_utils
 from vpnforge.models import Client, Secrets
@@ -117,7 +117,7 @@ class ClientManager:
         logger.info("Snapshot before rotate_all for %s: %s", ip, snapshot_path)
 
         secrets = self._store.load(ip)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for c in secrets.clients:
             c.vless_uuid = crypto_utils.generate_uuid4()
@@ -186,4 +186,7 @@ _RU_MAP = {
 
 
 def _translit_ru(s: str) -> str:
-    return "".join(_RU_MAP.get(ch, ch) for ch in s)
+    return "".join(
+        _RU_MAP.get(ch.lower(), ch).capitalize() if ch.isupper() else _RU_MAP.get(ch, ch)
+        for ch in s
+    )

@@ -1,0 +1,58 @@
+---
+- name: Write TLS fullchain
+  ansible.builtin.copy:
+    content: "{{ hysteria2.fullchain_b64 | b64decode }}"
+    dest: /etc/vpnforge/certs/fullchain.pem
+    owner: root
+    group: root
+    mode: "0644"
+  no_log: true
+
+- name: Write TLS private key
+  ansible.builtin.copy:
+    content: "{{ hysteria2.privkey_b64 | b64decode }}"
+    dest: /etc/vpnforge/certs/privkey.pem
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Write Hysteria config
+  ansible.builtin.copy:
+    content: "{{ hysteria_config | to_nice_yaml }}"
+    dest: /etc/vpnforge/hysteria.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify:
+    - reload hysteria
+    - restart compose
+
+- name: Install Hysteria binary (native)
+  when: vpnforge.runtime == "native"
+  block:
+    - name: Download Hysteria 2
+      ansible.builtin.get_url:
+        url: "https://github.com/apernet/hysteria/releases/download/app/v2.6.1/hysteria-linux-amd64"
+        dest: /usr/local/bin/hysteria
+        mode: "0755"
+        force: false
+
+    - name: Install Hysteria systemd unit
+      ansible.builtin.template:
+        src: templates/vpnforge-hysteria.service.j2
+        dest: /etc/systemd/system/vpnforge-hysteria.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - reload systemd
+        - restart hysteria
+
+    - name: Enable Hysteria
+      ansible.builtin.systemd:
+        name: vpnforge-hysteria
+        enabled: true
+        state: started
+        daemon_reload: true

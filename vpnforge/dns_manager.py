@@ -12,7 +12,8 @@ without monkeypatching module-level imported symbols.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import requests
 from tenacity import (
@@ -189,6 +190,7 @@ class CloudflareDNS:
             if (
                 str(rec.get("type", "")).upper() == "A"
                 and str(rec.get("name", "")).lower().rstrip(".") == fqdn
+                and isinstance(rec, dict)
             ):
                 return rec
         return None
@@ -205,7 +207,7 @@ class CloudflareDNS:
             reraise=True,
             stop=stop_after_attempt(self._max_attempts),
             wait=self._wait_strategy,
-            retry=retry_if_exception_type(_Retryable),
+            retry=retry_if_exception_type((_Retryable, requests.RequestException)),
         )
         try:
             return retryer(
@@ -226,7 +228,7 @@ class CloudflareDNS:
             resp = self._session.request(
                 method, url, params=params, json=json, timeout=self._timeout
             )
-        except requests.RequestException as exc:
+        except Exception as exc:
             logger.warning("CF network error: %s", exc)
             raise _Retryable(str(exc)) from exc
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=VPN-Forge Hysteria 2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hysteria server -c /etc/vpnforge/hysteria.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
