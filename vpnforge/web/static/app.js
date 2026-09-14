@@ -1,5 +1,5 @@
 // VPN-Forge Frontend - JARVIS-style UI
-// Mock implementation without backend integration
+// Backend integration
 
 // State management
 const state = {
@@ -7,25 +7,12 @@ const state = {
     vps: { ip: '', port: 22, user: 'root', auth: 'key', keyPath: '', password: '', runtime: 'native' },
     dns: { cfToken: '', root: '', sub: '' },
     certs: { fullchainPath: '', privkeyPath: '', info: null },
-    openflux: { transport: null, yandexUrl: '', maxToken: '', maxUid: '', encKey: '' },
+    openflux: { transport: null, mode: 'proxy', localIp: '', yandexUrl: '', maxToken: '', maxUid: '', encKey: '' },
     deploy: { jobId: null, running: false, stages: {}, logs: [] },
     clients: [],
     services: {},
     theme: 'dark',
     selectedClientId: null
-};
-
-// Mock data for testing
-const mockClients = [
-    { id: '1', label: 'Vasya', protocols: 'VLESS+Hy2', subToken: '7f3a9b2c', disabled: false },
-    { id: '2', label: 'Petya', protocols: 'VLESS+Hy2', subToken: '9d4e8f1a', disabled: false }
-];
-
-const mockServices = {
-    'xray.service': { status: 'active' },
-    'hysteria.service': { status: 'active' },
-    'vpnforge-sub.service': { status: 'active' },
-    'openflux.service': { status: 'inactive' }
 };
 
 // Initialize Lucide icons
@@ -51,6 +38,24 @@ function loadState() {
             console.error('Failed to load state:', e);
         }
     }
+}
+
+// API helper
+async function api(path, { method = 'GET', body, form } = {}) {
+    const opts = { method, headers: {} };
+    if (body) { 
+        opts.headers['Content-Type'] = 'application/json'; 
+        opts.body = JSON.stringify(body); 
+    }
+    if (form) { 
+        opts.body = form; 
+    }
+    const r = await fetch(path, opts);
+    if (!r.ok) {
+        const error = await r.json();
+        throw new Error(error.error?.message || 'API request failed');
+    }
+    return r.status === 204 ? null : r.json();
 }
 
 // UI Helpers
@@ -128,9 +133,15 @@ function updateAuthFields() {
 // OpenFlux transport fields
 function updateOpenFluxFields() {
     const transport = state.openflux.transport;
+    const mode = state.openflux.mode || 'proxy';
     hideElement('yandex-url-group');
     hideElement('oneme-group');
+    hideElement('openflux-localip-group');
     
+    if (mode === 'raw') {
+        showElement('openflux-localip-group');
+    }
+
     if (transport === 'yandex') {
         showElement('yandex-url-group');
     } else if (transport === 'oneme') {
@@ -142,6 +153,12 @@ function updateOpenFluxFields() {
 function renderClients() {
     const container = document.getElementById('clients-list');
     container.innerHTML = '';
+    
+    // Update client count in header
+    const clientCount = document.getElementById('client-count');
+    if (clientCount) {
+        clientCount.textContent = state.clients.length;
+    }
     
     state.clients.forEach(client => {
         const row = document.createElement('div');
@@ -174,10 +191,18 @@ function renderClients() {
         copyBtn.className = 'icon-btn';
         copyBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i>';
         copyBtn.title = 'Copy subscription URL';
-        copyBtn.onclick = (e) => {
+        copyBtn.onclick = async (e) => {
             e.stopPropagation();
-            copyToClipboard(`http://127.0.0.1:8000/api/sub/${client.subToken}`);
-            showToast('Copied.', 'success');
+            try {
+                const response = await fetch(`/api/sub/${client.subToken}`);
+                if (!response.ok) throw new Error('Failed to fetch subscription');
+                const subscription = await response.text();
+                copyToClipboard(subscription);
+                showToast('Copied.', 'success');
+            } catch (error) {
+                console.error('Failed to copy subscription:', error);
+                showToast('Failed to copy subscription', 'error');
+            }
         };
         
         const renameBtn = document.createElement('button');
@@ -218,37 +243,48 @@ function renderServices() {
     const container = document.getElementById('services-list');
     container.innerHTML = '';
     
-    Object.entries(state.services).forEach(([name, service]) => {
-        const row = document.createElement('div');
-        row.className = 'service-row';
+    // Update node count in header
+    const nodeCount = document.getElementById('node-count');
+    if (nodeCount) {
+        nodeCount.textContent = state.vps.ip ? '1' : '0';
+    }
+    
+    // For now, we don't have a services status endpoint, so we'll show placeholder
+    if (state.vps.ip) {
+        const services = [
+            { name: 'xray.service', status: 'unknown' },
+            { name: 'hysteria.service', status: 'unknown' },
+            { name: 'vpnforge-sub.service', status: 'unknown' }
+        ];
         
-        const status = document.createElement('span');
-        status.className = 'service-status';
-        status.textContent = '●';
-        
-        if (service.status === 'active') {
-            status.style.color = 'var(--success)';
-            status.classList.add('status-dot-pulse');
-        } else if (service.status === 'failed') {
-            status.style.color = 'var(--error)';
-        } else {
-            status.style.color = 'var(--text-dim)';
+        if (state.protocols.openflux) {
+            services.push({ name: 'openflux.service', status: 'unknown' });
         }
         
-        const serviceName = document.createElement('span');
-        serviceName.className = 'service-name';
-        serviceName.textContent = name;
-        
-        const stateText = document.createElement('span');
-        stateText.className = 'service-state';
-        stateText.textContent = service.status;
-        
-        row.appendChild(status);
-        row.appendChild(serviceName);
-        row.appendChild(stateText);
-        
-        container.appendChild(row);
-    });
+        services.forEach(service => {
+            const row = document.createElement('div');
+            row.className = 'service-row';
+            
+            const status = document.createElement('span');
+            status.className = 'service-status';
+            status.textContent = '●';
+            status.style.color = 'var(--text-dim)';
+            
+            const serviceName = document.createElement('span');
+            serviceName.className = 'service-name';
+            serviceName.textContent = service.name;
+            
+            const stateText = document.createElement('span');
+            stateText.className = 'service-state';
+            stateText.textContent = service.status;
+            
+            row.appendChild(status);
+            row.appendChild(serviceName);
+            row.appendChild(stateText);
+            
+            container.appendChild(row);
+        });
+    }
 }
 
 // Deployment overlay
@@ -307,70 +343,117 @@ function clearTerminal() {
     document.getElementById('log-container').innerHTML = '';
 }
 
-// Mock deployment process
-function startMockDeployment() {
-    state.deploy.running = true;
-    state.deploy.jobId = 'mock-' + Date.now();
-    state.deploy.stages = {};
-    state.deploy.logs = [];
-    
-    clearTerminal();
-    openDeployOverlay();
-    updateStatusDot(true);
-    
-    const stages = [
-        { name: 'apt', duration: 1000 },
-        { name: 'runtime', duration: 1500 },
-        { name: 'xray', duration: 2000 },
-        { name: 'hysteria', duration: 1500 },
-        { name: 'sub', duration: 1000 },
-        { name: 'verify', duration: 800 }
-    ];
-    
-    let currentIndex = 0;
-    
-    function runNextStage() {
-        if (currentIndex >= stages.length) {
-            completeDeployment(true);
+// Real deployment process
+async function startDeployment() {
+    try {
+        // Validate at least one protocol
+        if (!state.protocols.hysteria2 && !state.protocols.vless_reality && !state.protocols.openflux) {
+            showToast('At least one protocol must be enabled', 'error');
             return;
         }
         
-        const stage = stages[currentIndex];
-        state.deploy.stages[stage.name] = 'running';
-        updateStages();
-        addLogLine(`▸ ${stage.name} - starting...`);
+        // Validate VPS IP
+        if (!state.vps.ip) {
+            showToast('VPS IP is required', 'error');
+            return;
+        }
         
-        // Simulate log output
-        const mockLogs = [
-            `TASK [${stage.name} : setup] ***`,
-            `ok: [${state.vps.ip || '1.2.3.4'}]`,
-            `changed: [${state.vps.ip || '1.2.3.4'}]`
-        ];
+        // Prepare deploy request
+        const deployRequest = {
+            ip: state.vps.ip,
+            ssh_user: state.vps.user,
+            ssh_port: state.vps.port,
+            ssh_private_key_path: state.vps.auth === 'key' ? state.vps.keyPath : null,
+            ssh_password: state.vps.auth === 'password' ? state.vps.password : null,
+            domain: state.protocols.hysteria2 ? (state.dns.sub && state.dns.root ? `${state.dns.sub}.${state.dns.root}` : null) : null,
+            root_domain: state.dns.root || null,
+            protocols: state.protocols,
+            runtime: state.vps.runtime,
+            openflux: state.protocols.openflux ? {
+                transport: state.openflux.transport,
+                mode: state.openflux.mode || 'proxy',
+                local_ip: state.openflux.localIp || null,
+                yandex_url: state.openflux.yandexUrl || null,
+                max_token: state.openflux.maxToken || null,
+                max_uid: state.openflux.maxUid || null,
+                encryption_key: state.openflux.encKey || null,
+                debug: false,
+            } : null,
+            cf_api_token: state.dns.cfToken || null
+        };
         
-        let logIndex = 0;
-        const logInterval = setInterval(() => {
-            if (logIndex < mockLogs.length) {
-                addLogLine(mockLogs[logIndex]);
-                logIndex++;
-            } else {
-                clearInterval(logInterval);
+        // Prepare form data
+        const formData = new FormData();
+        formData.append('payload', JSON.stringify(deployRequest));
+        
+        // Add certificate files if Hysteria 2 is enabled
+        if (state.protocols.hysteria2) {
+            const certInput = document.getElementById('cert-file');
+            const keyInput = document.getElementById('key-file');
+            
+            if (certInput.files.length > 0) {
+                formData.append('fullchain', certInput.files[0]);
             }
-        }, 300);
+            if (keyInput.files.length > 0) {
+                formData.append('privkey', keyInput.files[0]);
+            }
+        }
         
-        setTimeout(() => {
-            clearInterval(logInterval);
-            state.deploy.stages[stage.name] = 'done';
-            updateStages();
-            addLogLine(`▸ ${stage.name} - done`, 'success');
-            currentIndex++;
-            runNextStage();
-        }, stage.duration);
+        state.deploy.running = true;
+        state.deploy.logs = [];
+        clearTerminal();
+        openDeployOverlay();
+        updateStatusDot(true);
+        
+        // Start deployment
+        const response = await api('/api/deploy', { method: 'POST', form: formData });
+        state.deploy.jobId = response.job_id;
+        
+        // Connect to SSE stream
+        connectToStream(response.job_id);
+        
+    } catch (error) {
+        console.error('Deployment failed:', error);
+        showToast(error.message, 'error');
+        state.deploy.running = false;
+        updateStatusDot(false);
     }
-    
-    runNextStage();
 }
 
-function completeDeployment(success) {
+// SSE stream connection
+function connectToStream(jobId) {
+    const eventSource = new EventSource(`/api/deploy/stream/${jobId}`);
+    
+    eventSource.addEventListener('log', (e) => {
+        const data = JSON.parse(e.data);
+        addLogLine(data.line);
+        state.deploy.logs.push(data.line);
+    });
+    
+    eventSource.addEventListener('stage', (e) => {
+        const data = JSON.parse(e.data);
+        if (data.stage) {
+            state.deploy.stages[data.stage] = data.status;
+            updateStages();
+        }
+    });
+    
+    eventSource.addEventListener('done', (e) => {
+        const data = JSON.parse(e.data);
+        eventSource.close();
+        completeDeployment(data.status === 'success');
+    });
+    
+    eventSource.addEventListener('error', (e) => {
+        eventSource.close();
+        completeDeployment(false);
+    });
+    
+    // Store for cleanup
+    state.deploy.eventSource = eventSource;
+}
+
+async function completeDeployment(success) {
     state.deploy.running = false;
     updateStatusDot(false);
     
@@ -381,13 +464,15 @@ function completeDeployment(success) {
             document.getElementById('app').classList.remove('flash-success');
         }, 1000);
         
-        // Add mock clients and services
-        state.clients = [...mockClients];
-        state.services = { ...mockServices };
-        renderClients();
-        renderServices();
-        updateSectionVisibility();
-        saveState();
+        // Load real clients from backend
+        try {
+            state.clients = await api(`/api/clients?ip=${state.vps.ip}`);
+            renderClients();
+            updateSectionVisibility();
+            saveState();
+        } catch (error) {
+            console.error('Failed to load clients:', error);
+        }
         
         showToast('Node forged successfully!', 'success');
     } else {
@@ -401,18 +486,26 @@ function completeDeployment(success) {
     }
 }
 
-function cancelDeployment() {
-    if (!state.deploy.running) return;
+async function cancelDeployment() {
+    if (!state.deploy.running || !state.deploy.jobId) return;
     
-    state.deploy.running = false;
-    addLogLine('▸ Deployment cancelled.', 'warning');
-    updateStatusDot(false);
-    
-    // Reset stages
-    Object.keys(state.deploy.stages).forEach(stage => {
-        state.deploy.stages[stage] = 'failed';
-    });
-    updateStages();
+    try {
+        await api(`/api/deploy/cancel/${state.deploy.jobId}`, { method: 'POST' });
+        if (state.deploy.eventSource) {
+            state.deploy.eventSource.close();
+        }
+        state.deploy.running = false;
+        addLogLine('▸ Deployment cancelled.', 'warning');
+        updateStatusDot(false);
+        
+        // Reset stages
+        Object.keys(state.deploy.stages).forEach(stage => {
+            state.deploy.stages[stage] = 'failed';
+        });
+        updateStages();
+    } catch (error) {
+        console.error('Failed to cancel deployment:', error);
+    }
 }
 
 // Status dot in header
@@ -461,78 +554,105 @@ function openDeleteClientModal(clientId) {
     }
 }
 
-function openViewConfigModal(clientId) {
+async function openViewConfigModal(clientId) {
     state.selectedClientId = clientId;
     const client = state.clients.find(c => c.id === clientId);
     if (client) {
         const container = document.getElementById('config-urls');
         container.innerHTML = '';
         
-        // Mock URLs
-        const urls = [
-            `vless://uuid-v4@${state.vps.ip || '1.2.3.4'}:443?type=xhttp&security=reality&pbk=test&fp=chrome&sni=www.microsoft.com&sid=deadbeef&path=/&mode=packet-up#${client.label}`,
-            `hysteria2://user:pass@${state.dns.sub ? state.dns.sub + '.' + state.dns.root : 'node1.example.com'}:443?sni=${state.dns.sub ? state.dns.sub + '.' + state.dns.root : 'node1.example.com'}&insecure=0&obfs=salamander&obfs-password=test#${client.label}`
-        ];
-        
-        urls.forEach(url => {
-            const urlDiv = document.createElement('div');
-            urlDiv.className = 'text-xs break-all p-2 bg-terminal rounded';
-            urlDiv.textContent = url;
-            container.appendChild(urlDiv);
-        });
-        
-        openModal('view-config-modal');
+        try {
+            // Get subscription URLs from backend
+            const response = await fetch(`/api/sub/${client.subToken}`);
+            if (!response.ok) throw new Error('Failed to fetch subscription');
+            const subscription = await response.text();
+            const urls = subscription.split('\n').filter(url => url.trim());
+            
+            urls.forEach(url => {
+                const urlDiv = document.createElement('div');
+                urlDiv.className = 'text-xs break-all p-2 rounded';
+                urlDiv.style.backgroundColor = 'var(--bg-terminal)';
+                urlDiv.textContent = url;
+                container.appendChild(urlDiv);
+            });
+            
+            openModal('view-config-modal');
+        } catch (error) {
+            console.error('Failed to load client config:', error);
+            showToast('Failed to load client configuration', 'error');
+        }
     }
 }
 
 // Client operations
-function addClient() {
+async function addClient() {
     const label = document.getElementById('new-client-label').value.trim();
     if (!label) {
         showToast('Label is required', 'error');
         return;
     }
     
-    const newClient = {
-        id: Date.now().toString(),
-        label: label,
-        protocols: 'VLESS+Hy2',
-        subToken: Math.random().toString(16).substring(2, 10),
-        disabled: false
-    };
-    
-    state.clients.push(newClient);
-    renderClients();
-    updateSectionVisibility();
-    saveState();
-    closeModal('add-client-modal');
-    showToast('Client added.', 'success');
+    try {
+        const newClient = await api('/api/clients', {
+            method: 'POST',
+            body: { ip: state.vps.ip, label }
+        });
+        
+        state.clients.push(newClient);
+        renderClients();
+        updateSectionVisibility();
+        saveState();
+        closeModal('add-client-modal');
+        showToast('Client added.', 'success');
+    } catch (error) {
+        console.error('Failed to add client:', error);
+        showToast(error.message, 'error');
+    }
 }
 
-function renameClient() {
+async function renameClient() {
     const label = document.getElementById('rename-client-label').value.trim();
     if (!label) {
         showToast('Label is required', 'error');
         return;
     }
     
-    const client = state.clients.find(c => c.id === state.selectedClientId);
-    if (client) {
-        client.label = label;
-        renderClients();
-        saveState();
+    try {
+        const updatedClient = await api(`/api/clients/${state.selectedClientId}`, {
+            method: 'PATCH',
+            body: { ip: state.vps.ip, label }
+        });
+        
+        const client = state.clients.find(c => c.id === state.selectedClientId);
+        if (client) {
+            Object.assign(client, updatedClient);
+            renderClients();
+            saveState();
+        }
         closeModal('rename-client-modal');
         showToast('Client renamed.', 'success');
+    } catch (error) {
+        console.error('Failed to rename client:', error);
+        showToast(error.message, 'error');
     }
 }
 
-function deleteClient() {
-    state.clients = state.clients.filter(c => c.id !== state.selectedClientId);
-    renderClients();
-    updateSectionVisibility();
-    saveState();
-    closeModal('delete-client-modal');
-    showToast('Client deleted.', 'success');
+async function deleteClient() {
+    try {
+        await api(`/api/clients/${state.selectedClientId}?ip=${encodeURIComponent(state.vps.ip)}`, {
+            method: 'DELETE'
+        });
+        
+        state.clients = state.clients.filter(c => c.id !== state.selectedClientId);
+        renderClients();
+        updateSectionVisibility();
+        saveState();
+        closeModal('delete-client-modal');
+        showToast('Client deleted.', 'success');
+    } catch (error) {
+        console.error('Failed to delete client:', error);
+        showToast(error.message, 'error');
+    }
 }
 
 // Utility functions
@@ -635,19 +755,7 @@ function setupFormInputs() {
 function setupEventListeners() {
     // Forge button
     document.getElementById('forge-btn').addEventListener('click', () => {
-        // Validate at least one protocol
-        if (!state.protocols.hysteria2 && !state.protocols.vless_reality && !state.protocols.openflux) {
-            showToast('At least one protocol must be enabled', 'error');
-            return;
-        }
-        
-        // Validate VPS IP
-        if (!state.vps.ip) {
-            showToast('VPS IP is required', 'error');
-            return;
-        }
-        
-        startMockDeployment();
+        startDeployment();
     });
     
     // Status button
@@ -696,15 +804,45 @@ function setupEventListeners() {
     });
     
     // Copy config button
-    document.getElementById('copy-config-btn').addEventListener('click', () => {
-        const urls = document.getElementById('config-urls').innerText;
-        copyToClipboard(urls);
-        showToast('Config copied to clipboard', 'success');
+    document.getElementById('copy-config-btn').addEventListener('click', async () => {
+        try {
+            const client = state.clients.find(c => c.id === state.selectedClientId);
+            if (client) {
+                const response = await fetch(`/api/sub/${client.subToken}`);
+                if (!response.ok) throw new Error('Failed to fetch subscription');
+                const subscription = await response.text();
+                copyToClipboard(subscription);
+                showToast('Config copied to clipboard', 'success');
+            }
+        } catch (error) {
+            console.error('Failed to copy config:', error);
+            showToast('Failed to copy config', 'error');
+        }
     });
     
-    // Validate cert button (mock)
-    document.getElementById('validate-cert-btn').addEventListener('click', () => {
-        showToast('Certificate validated successfully', 'success');
+    // Validate cert button
+    document.getElementById('validate-cert-btn').addEventListener('click', async () => {
+        const certInput = document.getElementById('cert-file');
+        const keyInput = document.getElementById('key-file');
+        
+        if (certInput.files.length === 0 || keyInput.files.length === 0) {
+            showToast('Please select both certificate and key files', 'error');
+            return;
+        }
+        
+        try {
+            const formData = new FormData();
+            formData.append('fullchain', certInput.files[0]);
+            formData.append('privkey', keyInput.files[0]);
+            formData.append('domain', state.dns.sub && state.dns.root ? `${state.dns.sub}.${state.dns.root}` : null);
+            
+            const certInfo = await api('/api/cert/validate', { method: 'POST', form: formData });
+            state.certs.info = certInfo;
+            showToast('Certificate validated successfully', 'success');
+        } catch (error) {
+            console.error('Certificate validation failed:', error);
+            showToast(error.message, 'error');
+        }
     });
     
     // File inputs
@@ -765,7 +903,12 @@ function initFormFromState() {
         document.getElementById('openflux-yandex').value = state.openflux.yandexUrl;
         document.getElementById('openflux-maxtoken').value = state.openflux.maxToken;
         document.getElementById('openflux-maxuid').value = state.openflux.maxUid;
+        document.getElementById('openflux-enckey').value = state.openflux.encKey;
     }
+    if (state.openflux.mode) {
+        document.querySelector(`input[name="openflux-mode"][value="${state.openflux.mode}"]`).checked = true;
+    }
+    document.getElementById('openflux-localip').value = state.openflux.localIp || '';
     
     updateAuthFields();
     updateOpenFluxFields();
@@ -773,17 +916,34 @@ function initFormFromState() {
 }
 
 // Initialize app
-function init() {
+async function init() {
     loadState();
     initIcons();
     initFormFromState();
     setupFormInputs();
     setupPasswordToggles();
     setupEventListeners();
+    
+    // Load clients from backend if VPS IP is set
+    if (state.vps.ip) {
+        try {
+            state.clients = await api(`/api/clients?ip=${state.vps.ip}`);
+        } catch (error) {
+            console.error('Failed to load clients:', error);
+            // Keep existing clients from localStorage if API fails
+        }
+    }
+    
     renderClients();
     renderServices();
     
-    console.log('VPN-Forge UI initialized (mock mode)');
+    // Initialize header stats
+    const clientCount = document.getElementById('client-count');
+    const nodeCount = document.getElementById('node-count');
+    if (clientCount) clientCount.textContent = state.clients.length;
+    if (nodeCount) nodeCount.textContent = state.vps.ip ? '1' : '0';
+    
+    console.log('VPN-Forge UI initialized (backend integration mode)');
 }
 
 // Start app when DOM is ready
