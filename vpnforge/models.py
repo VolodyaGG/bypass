@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 def _utcnow() -> datetime:
@@ -42,19 +42,49 @@ class OpenFluxConfig(BaseModel):
       * debug        -> --debug
     `encryption_key` is AES-256 material we generate; Ansible writes it
     to /etc/vpnforge/openflux.key and the service uses --encryption-key-file.
+
+    We accept both snake_case and camelCase payloads from the UI for
+    compatibility with the frontend's JS field names.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    transport: OpenFluxTransport = "cupsonline"
-    mode: OpenFluxMode = "proxy"
-    local_ip: str | None = None
-    yandex_url: str | None = None
-    max_token: str | None = None
-    max_uid: str | None = None
-    encryption_key: str | None = None
-    session_b64: str | None = None
-    debug: bool = False
+    transport: OpenFluxTransport = Field(
+        default="cupsonline",
+        validation_alias=AliasChoices("transport"),
+    )
+    mode: OpenFluxMode = Field(
+        default="proxy",
+        validation_alias=AliasChoices("mode"),
+    )
+    local_ip: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("local_ip", "localIp"),
+    )
+    yandex_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("yandex_url", "yandexUrl"),
+    )
+    max_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("max_token", "maxToken"),
+    )
+    max_uid: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("max_uid", "maxUid"),
+    )
+    encryption_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("encryption_key", "encryptionKey", "encKey"),
+    )
+    session_b64: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("session_b64", "sessionB64"),
+    )
+    debug: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("debug"),
+    )
 
 
 class RealityConfig(BaseModel):

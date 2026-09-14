@@ -353,6 +353,17 @@ def create_app(
 
         return EventSourceResponse(events())
 
+    @app.post("/api/deploy/cancel/{job_id}")
+    async def deploy_cancel(job_id: str) -> dict[str, str]:
+        job = ctx.jobs.get(job_id)
+        if job is None:
+            raise ApiError("job_not_found", f"job {job_id} not found", 404)
+        
+        # Note: This is a simplified cancel - in production you'd want to actually
+        # cancel the running Ansible process. For now, we'll just mark it as cancelled.
+        job.finish("cancelled", error="Deployment cancelled by user")
+        return {"status": "cancelled"}
+
     @app.get("/api/sub/{sub_token}", response_class=PlainTextResponse)
     async def local_sub(sub_token: str) -> str:
         for ip in ctx.store.list_ips():

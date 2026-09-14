@@ -1,66 +1,174 @@
-# VPN-Forge (backend)
+# VPN-Forge
 
-Local FastAPI app that deploys a VPN stack (Hysteria 2, VLESS Reality xHTTP, OpenFlux) to a clean Ubuntu VPS via Ansible. Control plane stays on your machine; the VPS only runs protocol daemons and a tiny subscription server on port 80.
+VPN-Forge — это локальный control plane для развёртывания VPN-стека на чистом Ubuntu VPS через Ansible. Проект объединяет несколько протоколов: Hysteria 2, VLESS Reality xHTTP и OpenFlux, а также умеет управлять клиентами, генерировать подписки и деплоить сервисы на удалённый сервер.
 
-This repo is **backend-only** (no UI).
+Основная идея простая: вся логика управления остаётся на вашей машине, а на VPS запускаются только нужные сервисы и небольшой subscription-server.
 
-## Requirements
+## Что умеет проект
+
+- валидировать TLS-сертификаты;
+- поднимать DNS A-запись через Cloudflare;
+- хранить секреты по VPS-адресу;
+- создавать и управлять клиентами;
+- генерировать subscription URLs;
+- запускать деплой через Ansible;
+- отслеживать прогресс деплоя в realtime через SSE;
+- поддерживать OpenFlux как один из протоколов туннеля.
+
+## Архитектура
+
+- backend: FastAPI, Python
+- frontend: статический UI, отдаётся через FastAPI
+- orchestration: Ansible для VPS
+- storage: JSON-файлы в `data/secrets/`
+- target server: Ubuntu VPS, где запускаются xray/hysteria/openflux/subscription сервисы
+
+Ключевой модуль: `vpnforge/main.py`.
+Ключевая логика OpenFlux: `vpnforge/openflux_manager.py`.
+Ansible-плейбук деплоя: `ansible/deploy.yml`.
+
+## Требования
+
+Перед запуском убедитесь, что установлено:
 
 - Python 3.11+
 - [Poetry](https://python-poetry.org/)
-- Ansible (`ansible-playbook` on PATH, e.g. `pipx install ansible-core`)
-- SSH access to the target VPS (key or password)
+- Ansible (`ansible-playbook` должен быть в `PATH`)
+- SSH-доступ к целевому VPS (ключ или пароль)
+- Для DNS/Cloudflare: Cloudflare API token (опционально)
 
-## Install
+Для установки Ansible можно использовать, например:
 
 ```bash
-poetry install
-cp .env.example .env
+pipx install ansible-core
 ```
 
-Environment (`VPNFORGE_` prefix):
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `VPNFORGE_DATA_DIR` | `./data` | Secrets and deploy run dirs |
-| `VPNFORGE_LOG_LEVEL` | `INFO` | Log level |
-| `VPNFORGE_ANSIBLE_BIN` | `ansible-playbook` | Playbook binary |
-| `VPNFORGE_ANSIBLE_TIMEOUT` | `1800` | Deploy timeout, seconds |
-| `VPNFORGE_CF_API_TOKEN` | empty | Cloudflare API token (DNS A upsert) |
-
-Secrets live in `data/secrets/<ip>.json` (mode `600`) and are gitignored.
-
-## Run
+## Установка зависимостей
 
 ```bash
+cd <путь_к_проекту>
+poetry install
+```
+
+Если проект использует переменные окружения, создайте `.env` или задайте нужные значения в shell. В проекте есть параметры, которые читаются через `pydantic-settings`, а также поддерживаются переменные с префиксом `VPNFORGE_`.
+
+Типичные переменные:
+
+- `VPNFORGE_DATA_DIR` — каталог для секретов и run-данных
+- `VPNFORGE_LOG_LEVEL` — уровень логирования
+- `VPNFORGE_ANSIBLE_BIN` — путь к `ansible-playbook`
+- `VPNFORGE_ANSIBLE_TIMEOUT` — таймаут деплоя
+- `VPNFORGE_CF_API_TOKEN` — токен Cloudflare для DNS
+
+## Запуск проекта
+
+### Запуск backend
+
+```bash
+cd <путь_к_проекту>
 poetry run uvicorn vpnforge.main:app --host 127.0.0.1 --port 8000
 ```
 
-`GET /api/health` should return `{"status":"ok"}`.
+После этого приложение будет доступно по адресу:
 
-Main routes: cert validate, DNS upsert, secrets load/export/import, clients CRUD + rotate, `POST /api/deploy` (202 + `job_id`), `GET /api/deploy/stream/{job_id}` (SSE), local `GET /api/sub/{token}`.
+- UI: http://127.0.0.1:8000/
+- health check: http://127.0.0.1:8000/api/health
 
-`POST /api/deploy` is `multipart/form-data`:
-
-- `payload` — JSON `DeployRequest` (ip, protocols, domain, ssh, openflux, …)
-- `fullchain` / `privkey` — PEM files, required when Hysteria 2 is enabled
-
-At least one protocol must be enabled. Reality / Hysteria keys are generated once and reused on redeploy.
-
-## Tests
+### Проверка
 
 ```bash
+curl http://127.0.0.1:8000/api/health
+```
+
+Ожидаемый ответ:
+
+```json
+{"status":"ok"}
+```
+
+## Базовые API-эндпоинты
+
+- `GET /api/health` — статус сервера
+- `POST /api/cert/validate` — валидация сертификата
+- `POST /api/dns/upsert` — создание/обновление DNS A-записи
+- `POST /api/secrets/load` — загрузка secrets по IP
+- `POST /api/secrets/export` — экспорт secrets
+- `POST /api/secrets/import` — импорт secrets
+- `GET /api/clients` — список клиентов
+- `POST /api/clients` — добавление клиента
+- `PATCH /api/clients/{id}` — обновление клиента
+- `DELETE /api/clients/{id}` — удаление клиента
+- `POST /api/deploy` — запуск деплоя
+- `GET /api/deploy/stream/{job_id}` — SSE-поток логов деплоя
+- `GET /api/sub/{token}` — локальная подписка для клиента
+
+## OpenFlux
+
+Проект уже содержит реальную интеграцию с upstream-репозиторием OpenFlux:
+
+- https://github.com/p1neappleXpress/OpenFlux
+
+Что здесь реализовано:
+
+- модель конфигурации OpenFlux в `vpnforge/models.py`;
+- генерация аргументов запуска `universal-bypass-tool` в `vpnforge/openflux_manager.py`;
+- Ansible-задача для сборки и запуска OpenFlux на VPS в `ansible/tasks/openflux.yml`;
+- UI-поля для выбора транспорта и режима в `vpnforge/web/templates/index.html`;
+- данные для деплоя отправляются через backend в `POST /api/deploy`.
+
+Поддерживаемые транспорты в проекте:
+
+- `cupsonline`
+- `yandex`
+- `oneme`
+
+Режимы:
+
+- `proxy` — безопасный и рекомендуемый режим
+- `raw` — Linux-only, требует root и сетевые/iptables настройки
+
+### Важные ограничения OpenFlux в этом проекте
+
+- `raw` mode не настраивает iptables автоматически;
+- Docker runtime не поддерживается в текущей реализации;
+- часть сценариев зависит от того, как именно устроен upstream OpenFlux и какие возможности доступны в его документации;
+- для реального деплоя нужен живой VPS и корректная SSH-среда.
+
+Это нормально для MVP/alpha-версии, но означает, что проект пока не является полностью универсальной production-ready реализацией всех режимов OpenFlux.
+
+## Запуск тестов
+
+```bash
+cd <путь_к_проекту>
 poetry run pytest
+```
+
+Также можно запускать linters:
+
+```bash
 poetry run ruff check
 poetry run mypy vpnforge
 ```
 
-Coverage gate is 85%. Tests do not talk to the network (Cloudflare and Ansible are mocked).
+## Ограничения текущей версии
 
-## Limitations (this iteration)
+- нет полноценной авторизации/ролей;
+- проект рассчитан на локальный control plane и на доверенную среду;
+- сертификаты передаются в деплой вручную, а не автоматически выдаются на VPS;
+- no UI/UX hardening, no multi-server orchestration;
+- OpenFlux raw mode и часть edge cases требуют ручной настройки на сервере;
+- для реального production deployment нужна отдельная проверка окружения и сетевой безопасности.
 
-- No UI, QR codes, ACME issuance, Xray gRPC stats, or multi-server.
-- Certificates are uploaded; they are not issued on the VPS.
-- OpenFlux `raw` mode does not configure iptables for you.
-- Windows-specific ansible-runner behaviour is not supported.
-- E2E against a real VPS is manual: valid cert + CF token + clean Ubuntu → deploy → `curl http://<vps>/sub/<token>`.
+## Рекомендуемый сценарий использования
+
+1. Подготовить VPS и SSH-доступ.
+2. Установить зависимости через Poetry.
+3. Запустить backend локально.
+4. Открыть UI по адресу `http://127.0.0.1:8000/`.
+5. Настроить VPS, домен, TLS, протоколы и OpenFlux параметры.
+6. Нажать deploy и следить за логами.
+7. После завершения проверить подписки и доступность сервисов на VPS.
+
+## Краткий вывод
+
+VPN-Forge — это проект-оркестратор для VPN-стека, который уже умеет многое: деплои, кейсы с OpenFlux, управление секретами, составление подписок и работа с сервером через Ansible. Он находится в стадии зрелого MVP, но всё ещё требует аккуратной настройки окружения и проверки реального VPS-репозитория перед production-использованием.
