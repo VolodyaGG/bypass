@@ -1,3 +1,3 @@
-"""VPN-Forge backend package."""
+"""bypass backend package."""
 
 __version__ = "0.1.0"

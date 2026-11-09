@@ -2,7 +2,7 @@
 name = "vpnforge"
 version = "0.1.0"
 description = "Local FastAPI backend that deploys a VPN stack to a clean VPS via Ansible"
-authors = ["VPN-Forge"]
+authors = ["bypass"]
 readme = "README.md"
 packages = [{ include = "vpnforge" }]
 
