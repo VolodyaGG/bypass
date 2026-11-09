@@ -1,0 +1,32 @@
+{
+  "log": {"loglevel": "error"},
+  "inbounds": [{
+    "listen": "127.0.0.1",
+    "port": 11808,
+    "protocol": "socks",
+    "settings": {"udp": false}
+  }],
+  "outbounds": [{
+    "protocol": "vless",
+    "settings": {"vnext": [{
+      "address": "127.0.0.1",
+      "port": 443,
+      "users": [{
+        "id": {{ xray_config.inbounds[0].settings.clients[0].id | to_json }},
+        "encryption": "none",
+        "flow": {{ xray_config.inbounds[0].settings.clients[0].flow | to_json }}
+      }]
+    }]},
+    "streamSettings": {
+      "network": "tcp",
+      "tcpSettings": {"header": {"type": "none"}},
+      "security": "reality",
+      "realitySettings": {
+        "serverName": {{ reality.server_name | to_json }},
+        "fingerprint": {{ reality.fingerprint | to_json }},
+        "password": {{ reality.public_key | to_json }},
+        "shortId": {{ reality.short_id | to_json }}
+      }
+    }
+  }]
+}

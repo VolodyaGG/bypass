@@ -1,5 +1,5 @@
 ---
-- name: VPN-Forge deploy
+- name: bypass deploy
   hosts: vpn
   become: true
   gather_facts: true
@@ -65,6 +65,9 @@
 
     - name: Subscription server
       ansible.builtin.import_tasks: tasks/sub_server.yml
+
+    - name: Apply pending service restarts
+      ansible.builtin.meta: flush_handlers
 
     - name: Verify services
       ansible.builtin.import_tasks: tasks/verify.yml

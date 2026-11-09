@@ -21,6 +21,7 @@ from vpnforge.openflux_manager import (
     OPENFLUX_KEY_PATH,
     OpenFluxDeployFailed,
     OpenFluxError,
+    build_client_argv,
     build_exit_node_argv,
     fetch_session_with_retry,
     parse_session_b64,
@@ -158,16 +159,19 @@ def test_parse_skips_invalid_first_marker() -> None:
 # ---------- build_exit_node_argv ----------
 
 
-def test_argv_cupsonline_proxy_default() -> None:
+def test_argv_cupsonline_l4_default() -> None:
     s = _secrets_with_openflux(transport="cupsonline", mode="proxy")
     argv = build_exit_node_argv(s)
     assert argv == [
         OPENFLUX_BIN,
-        "--exit-node",
+        "--role",
+        "exit",
         "--transport",
         "cupsonline",
         "--mode",
-        "proxy",
+        "l4",
+        "--codec",
+        "batched",
     ]
 
 
@@ -180,7 +184,7 @@ def test_argv_never_contains_socks5() -> None:
 
 def test_argv_yandex_requires_url() -> None:
     s = _secrets_with_openflux(transport="yandex", mode="proxy")
-    with pytest.raises(OpenFluxError, match="yandex_url"):
+    with pytest.raises(OpenFluxError, match="document URL"):
         build_exit_node_argv(s)
 
 
@@ -215,17 +219,18 @@ def test_argv_oneme_with_creds() -> None:
     assert "uid-1" in argv
 
 
-def test_argv_raw_requires_local_ip() -> None:
+def test_argv_l3_can_auto_detect_local_ip() -> None:
     s = _secrets_with_openflux(mode="raw")
-    with pytest.raises(OpenFluxError, match="local_ip"):
-        build_exit_node_argv(s)
+    argv = build_exit_node_argv(s)
+    assert "l3" in argv
+    assert "--local-ip" not in argv
 
 
-def test_argv_raw_with_local_ip() -> None:
+def test_argv_l3_with_local_ip() -> None:
     s = _secrets_with_openflux(mode="raw", local_ip="203.0.113.10")
     argv = build_exit_node_argv(s)
     assert "--mode" in argv
-    assert "raw" in argv
+    assert "l3" in argv
     assert "--local-ip" in argv
     assert "203.0.113.10" in argv
 
@@ -260,6 +265,40 @@ def test_argv_cupsonline_has_no_url() -> None:
     s = _secrets_with_openflux(transport="cupsonline", yandex_url="https://x")
     argv = build_exit_node_argv(s)
     assert "--url" not in argv
+
+
+@pytest.mark.parametrize("transport", ["yandex", "vyandex", "mailru"])
+def test_document_transports_use_url(transport: str) -> None:
+    s = _secrets_with_openflux(transport=transport, yandex_url="https://docs.example/x")
+    argv = build_exit_node_argv(s)
+    assert argv[argv.index("--url") + 1] == "https://docs.example/x"
+
+
+def test_argv_legacy_codec() -> None:
+    s = _secrets_with_openflux(codec="legacy")
+    argv = build_exit_node_argv(s)
+    assert argv[argv.index("--codec") + 1] == "legacy"
+
+
+def test_client_argv_cupsonline_uses_session_and_matching_codec() -> None:
+    session = _valid_b64()
+    secrets = _secrets_with_openflux(
+        transport="cupsonline",
+        codec="batched",
+        session_b64=session,
+        encryption_key="secret",
+    )
+    argv = build_client_argv(secrets)
+    assert argv[:4] == ["openflux", "--role", "client", "--inbound"]
+    assert argv[argv.index("--url") + 1] == session
+    assert argv[argv.index("--codec") + 1] == "batched"
+    assert "openflux.key" in argv
+
+
+def test_client_argv_cupsonline_requires_deployed_session() -> None:
+    secrets = _secrets_with_openflux(transport="cupsonline")
+    with pytest.raises(OpenFluxError, match="deploy the exit node"):
+        build_client_argv(secrets)
 
 
 # ---------- fetch_session_with_retry ----------

@@ -190,6 +190,30 @@ def test_gv_hysteria_requires_cert() -> None:
         )
 
 
+def test_gv_hysteria_accepts_existing_vps_certificate() -> None:
+    gv = build_group_vars(
+        _secrets(),
+        cert=None,
+        certificate_source="vps",
+        vps_fullchain_path="/etc/letsencrypt/live/node1.example.com/fullchain.pem",
+        vps_privkey_path="/etc/letsencrypt/live/node1.example.com/privkey.pem",
+    )
+    hysteria = gv["hysteria2"]
+    assert hysteria["certificate_source"] == "vps"
+    assert hysteria["fullchain_b64"] is None
+    assert hysteria["vps_fullchain_path"].endswith("/fullchain.pem")
+
+
+def test_gv_hysteria_vps_certificate_requires_both_paths() -> None:
+    with pytest.raises(InventoryError, match="certificate paths on VPS"):
+        build_group_vars(
+            _secrets(),
+            cert=None,
+            certificate_source="vps",
+            vps_fullchain_path="/etc/letsencrypt/live/node1.example.com/fullchain.pem",
+        )
+
+
 def test_gv_reality_requires_config() -> None:
     s = _secrets(with_reality=True, with_hysteria=False)
     s.reality = None
@@ -213,6 +237,25 @@ def test_gv_common_section() -> None:
     assert gv["vpnforge"]["server_ip"] == "1.2.3.4"
     assert gv["vpnforge"]["server_domain"] == "node1.example.com"
     assert gv["vpnforge"]["clients_json_path"] == "/opt/vpnforge/sub/clients.json"
+    assert gv["vpnforge"]["subscription_scheme"] == "http"
+    assert gv["vpnforge"]["subscription_port"] == 8080
+
+
+def test_gv_subscription_without_certificate_uses_http() -> None:
+    gv = build_group_vars(_secrets(with_hysteria=False), cert=None)
+    assert gv["vpnforge"]["subscription_scheme"] == "http"
+    assert gv["vpnforge"]["subscription_port"] == 8080
+
+
+def test_gv_subscription_with_certificate_uses_https() -> None:
+    gv = build_group_vars(
+        _secrets(),
+        cert=_cert(),
+        fullchain_b64="Zm9v",
+        privkey_b64="YmFy",
+    )
+    assert gv["vpnforge"]["subscription_scheme"] == "https"
+    assert gv["vpnforge"]["subscription_port"] == 8444
 
 
 def test_gv_protocols_flags() -> None:
@@ -294,7 +337,8 @@ def test_gv_openflux_block() -> None:
     )
     of = gv["openflux"]
     assert of["transport"] == "cupsonline"
-    assert of["mode"] == "proxy"
+    assert of["mode"] == "l4"
+    assert of["codec"] == "batched"
     assert of["yandex_url"] == "https://ya.ru"
     assert of["session_b64"] is None
     assert of["debug"] is False
@@ -312,12 +356,13 @@ def test_gv_openflux_argv_present() -> None:
     argv = gv["openflux"]["argv"]
     assert isinstance(argv, list)
     assert all(isinstance(a, str) for a in argv)
-    assert argv[0].endswith("universal-bypass-tool")
-    assert "--exit-node" in argv
+    assert argv[0].endswith("openflux")
+    assert "--role" in argv
+    assert "exit" in argv
     assert "--transport" in argv
     assert "cupsonline" in argv
     assert "--mode" in argv
-    assert "proxy" in argv
+    assert "l4" in argv
 
 
 def test_gv_openflux_argv_has_no_socks5() -> None:
@@ -344,7 +389,7 @@ def test_gv_openflux_yandex_requires_url() -> None:
     s = _secrets(with_reality=False, with_hysteria=False, with_openflux=True)
     s.openflux.transport = "yandex"
     s.openflux.yandex_url = None
-    with pytest.raises(OpenFluxError, match="yandex_url"):
+    with pytest.raises(OpenFluxError, match="document URL"):
         build_group_vars(s, cert=None)
 
 
@@ -357,12 +402,13 @@ def test_gv_openflux_oneme_requires_creds() -> None:
         build_group_vars(s, cert=None)
 
 
-def test_gv_openflux_raw_requires_local_ip() -> None:
+def test_gv_openflux_l3_can_auto_detect_local_ip() -> None:
     s = _secrets(with_reality=False, with_hysteria=False, with_openflux=True)
-    s.openflux.mode = "raw"
+    s.openflux = OpenFluxConfig(transport="cupsonline", mode="raw")
     s.openflux.local_ip = None
-    with pytest.raises(OpenFluxError, match="local_ip"):
-        build_group_vars(s, cert=None)
+    gv = build_group_vars(s, cert=None)
+    assert gv["openflux"]["mode"] == "l3"
+    assert "--local-ip" not in gv["openflux"]["argv"]
 
 
 def test_gv_openflux_env_merged() -> None:
@@ -479,7 +525,7 @@ def test_dump_gv_openflux_argv_is_yaml_list() -> None:
     )
     parsed = yaml.safe_load(dump_group_vars(gv))
     assert isinstance(parsed["openflux"]["argv"], list)
-    assert "--exit-node" in parsed["openflux"]["argv"]
+    assert "--role" in parsed["openflux"]["argv"]
 
 
 # ---------- encode_pem_b64 ----------
@@ -514,6 +560,8 @@ def test_golden_gv_reality_only() -> None:
             "server_ip": "1.2.3.4",
             "server_domain": "node1.example.com",
             "clients_json_path": "/opt/vpnforge/sub/clients.json",
+            "subscription_scheme": "http",
+            "subscription_port": 8080,
         },
         "protocols": {
             "hysteria2": False,
@@ -546,6 +594,8 @@ def test_golden_gv_openflux_only() -> None:
         "server_ip": "1.2.3.4",
         "server_domain": "node1.example.com",
         "clients_json_path": "/opt/vpnforge/sub/clients.json",
+        "subscription_scheme": "http",
+        "subscription_port": 8080,
     }
     assert gv["protocols"] == {
         "hysteria2": False,
@@ -557,14 +607,17 @@ def test_golden_gv_openflux_only() -> None:
     assert "cert" not in gv
 
     of = gv["openflux"]
-    # argv is exactly what build_exit_node_argv produces for cupsonline/proxy.
+    # argv is exactly what build_exit_node_argv produces for cupsonline/l4.
     assert of["argv"] == [
-        "/usr/local/bin/universal-bypass-tool",
-        "--exit-node",
+        "/usr/local/bin/openflux",
+        "--role",
+        "exit",
         "--transport",
         "cupsonline",
         "--mode",
-        "proxy",
+        "l4",
+        "--codec",
+        "batched",
     ]
 
 

@@ -184,7 +184,7 @@ def test_xray_inbound_keys() -> None:
 def test_xray_inbound_basic_fields() -> None:
     c = _client("vasya", UUID_A, "vasya", "pw")
     inbound = build_xray_config(_secrets([c]))["inbounds"][0]
-    assert inbound["tag"] == "vless-reality-xhttp"
+    assert inbound["tag"] == "vless-reality-tcp"
     assert inbound["listen"] == "0.0.0.0"
     assert inbound["port"] == 443
     assert inbound["protocol"] == "vless"
@@ -195,12 +195,14 @@ def test_xray_inbound_settings() -> None:
     inbound = build_xray_config(_secrets([c]))["inbounds"][0]
     assert inbound["settings"]["decryption"] == "none"
     assert "clients" in inbound["settings"]
+    assert inbound["settings"]["clients"][0]["flow"] == "xtls-rprx-vision"
 
 
 def test_xray_stream_settings_network_and_security() -> None:
     c = _client("vasya", UUID_A, "vasya", "pw")
     ss = build_xray_config(_secrets([c]))["inbounds"][0]["streamSettings"]
-    assert ss["network"] == "xhttp"
+    assert ss["network"] == "tcp"
+    assert ss["tcpSettings"] == {"header": {"type": "none"}}
     assert ss["security"] == "reality"
 
 
@@ -216,10 +218,10 @@ def test_xray_reality_settings_full() -> None:
     assert rs["shortIds"] == ["deadbeef"]
 
 
-def test_xray_xhttp_settings() -> None:
+def test_xray_tcp_transport_has_no_xhttp_settings() -> None:
     c = _client("vasya", UUID_A, "vasya", "pw")
     ss = build_xray_config(_secrets([c]))["inbounds"][0]["streamSettings"]
-    assert ss["xhttpSettings"] == {"path": "/", "mode": "packet-up"}
+    assert "xhttpSettings" not in ss
 
 
 def test_xray_sniffing_enabled() -> None:
@@ -260,7 +262,11 @@ def test_xray_no_api_inbound() -> None:
 def test_xray_client_entry_shape() -> None:
     c = _client("vasya", UUID_A, "vasya", "pw", client_id="abcdef1234567890")
     clients = build_xray_config(_secrets([c]))["inbounds"][0]["settings"]["clients"]
-    assert clients == [{"id": UUID_A, "email": "vasya@abcdef12"}]
+    assert clients == [{
+        "id": UUID_A,
+        "email": "vasya@abcdef12",
+        "flow": "xtls-rprx-vision",
+    }]
 
 
 def test_xray_two_clients_both_present() -> None:

@@ -16,12 +16,23 @@
     name:
       - ca-certificates
       - curl
+      - iptables
       - unzip
       - python3
       - python3-venv
       - python3-pip
     state: present
     update_cache: true
+
+- name: Read installed services
+  ansible.builtin.service_facts:
+
+- name: Stop and disable nginx to release TCP ports 80 and 443
+  ansible.builtin.systemd:
+    name: nginx
+    state: stopped
+    enabled: false
+  when: "'nginx.service' in ansible_facts.services"
 
 - name: Install BBR sysctl
   ansible.builtin.template:

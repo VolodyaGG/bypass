@@ -1,10 +1,10 @@
 """OpenFlux exit-node manager.
 
 OpenFlux (https://github.com/p1neappleXpress/OpenFlux) is a TCP tunnel
-with pluggable transports. The exit-node binary is `universal-bypass-tool`
+with pluggable transports. The current exit-node binary is `openflux`
 and is invoked as::
 
-    universal-bypass-tool --exit-node --transport <t> --mode <m> [...]
+    openflux --role=exit --transport <t> --mode <m> [...]
 
 Session extraction is ONLY meaningful for the ``cupsonline`` transport:
 that transport creates a set of Centrifugo rooms at startup and prints a
@@ -30,6 +30,7 @@ import base64
 import binascii
 import logging
 import re
+import shlex
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,7 @@ _DECOR_LINE_RE = re.compile(r"^=+\s*$")
 _B64_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
 # Paths used by the systemd unit / Ansible template.
-OPENFLUX_BIN = "/usr/local/bin/universal-bypass-tool"
+OPENFLUX_BIN = "/usr/local/bin/openflux"
 OPENFLUX_KEY_PATH = "/etc/vpnforge/openflux.key"
 
 
@@ -85,27 +86,28 @@ def build_exit_node_argv(secrets: Secrets) -> list[str]:
       * `--url` is required for yandex and passed as-is.
       * For cupsonline no `--url` is needed — the exit node prints the
         room list itself.
-      * For raw mode `--local-ip` is required.
+      * For l3 mode `--local-ip` is optional; OpenFlux can auto-detect it.
     """
     o = secrets.openflux
 
     argv: list[str] = [
         OPENFLUX_BIN,
-        "--exit-node",
+        "--role",
+        "exit",
         "--transport",
         o.transport,
         "--mode",
         o.mode,
+        "--codec",
+        o.codec,
     ]
 
-    if o.mode == "raw":
-        if not o.local_ip:
-            raise OpenFluxError("raw mode requires local_ip")
+    if o.mode == "l3" and o.local_ip:
         argv += ["--local-ip", o.local_ip]
 
-    if o.transport == "yandex":
+    if o.transport in {"yandex", "vyandex", "mailru"}:
         if not o.yandex_url:
-            raise OpenFluxError("yandex transport requires yandex_url")
+            raise OpenFluxError(f"{o.transport} transport requires document URL")
         argv += ["--url", o.yandex_url]
 
     if o.transport == "oneme":
@@ -120,6 +122,45 @@ def build_exit_node_argv(secrets: Secrets) -> list[str]:
         argv.append("--debug")
 
     return argv
+
+
+def build_client_argv(secrets: Secrets, *, inbound: str = "socks5") -> list[str]:
+    """Build the matching current OpenFlux client command."""
+    openflux = secrets.openflux
+    argv = [
+        "openflux",
+        "--role",
+        "client",
+        "--inbound",
+        inbound,
+        "--transport",
+        openflux.transport,
+        "--codec",
+        openflux.codec,
+    ]
+
+    if openflux.transport == "cupsonline":
+        if not openflux.session_b64:
+            raise OpenFluxError("cupsonline session is not available; deploy the exit node first")
+        argv += ["--url", openflux.session_b64]
+    elif openflux.transport in {"yandex", "vyandex", "mailru"}:
+        if not openflux.yandex_url:
+            raise OpenFluxError(f"{openflux.transport} transport requires document URL")
+        argv += ["--url", openflux.yandex_url]
+    elif openflux.transport == "oneme":
+        if not openflux.max_token or not openflux.max_uid:
+            raise OpenFluxError("oneme transport requires max_token and max_uid")
+        argv += ["--maxToken", openflux.max_token, "--maxUid", openflux.max_uid]
+
+    if inbound == "socks5":
+        argv += ["--socks5", "127.0.0.1:1080"]
+    if openflux.encryption_key:
+        argv += ["--encryption-key-file", "openflux.key"]
+    return argv
+
+
+def build_client_command(secrets: Secrets, *, inbound: str = "socks5") -> str:
+    return shlex.join(build_client_argv(secrets, inbound=inbound))
 
 
 # ---------- parsing ----------

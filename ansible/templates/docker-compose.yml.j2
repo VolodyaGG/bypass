@@ -30,17 +30,9 @@ services:
       VPNFORGE_CLIENTS_FILE: "{{ vpnforge.clients_json_path }}"
     volumes:
       - /opt/vpnforge/sub:/opt/vpnforge/sub
+{% if vpnforge.subscription_scheme == "https" %}
+      - /etc/vpnforge/certs:/etc/vpnforge/certs:ro
+{% endif %}
     command: >
       sh -c "pip install -q -r /opt/vpnforge/sub/requirements.txt &&
-      python -m uvicorn app:app --host 0.0.0.0 --port 80"
-{% if protocols.openflux %}
-  openflux:
-    image: golang:1.22
-    container_name: vpnforge-openflux
-    network_mode: host
-    restart: unless-stopped
-    volumes:
-      - /usr/local/bin/universal-bypass-tool:/usr/local/bin/universal-bypass-tool:ro
-      - /etc/vpnforge/openflux.key:/etc/vpnforge/openflux.key:ro
-    command: {{ openflux.argv | to_json }}
-{% endif %}
+      python -m uvicorn app:app --host 0.0.0.0 --port {{ vpnforge.subscription_port }}{{ ' --ssl-certfile /etc/vpnforge/certs/fullchain.pem --ssl-keyfile /etc/vpnforge/certs/privkey.pem' if vpnforge.subscription_scheme == 'https' else '' }}"

@@ -1,15 +1,19 @@
 [Unit]
-Description=VPN-Forge OpenFlux exit-node
+Description=bypass OpenFlux exit-node
 Documentation=https://github.com/p1neappleXpress/OpenFlux
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-{% if openflux.mode == 'raw' %}
+{% if openflux.mode == 'l3' %}
 User=root
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+ExecStartPre=/bin/sh -c '/usr/sbin/iptables -C OUTPUT -p tcp --tcp-flags RST RST -m mark ! --mark 0x2547 -j DROP 2>/dev/null || /usr/sbin/iptables -A OUTPUT -p tcp --tcp-flags RST RST -m mark ! --mark 0x2547 -j DROP'
+ExecStopPost=-/usr/sbin/iptables -D OUTPUT -p tcp --tcp-flags RST RST -m mark ! --mark 0x2547 -j DROP
 {% endif %}
-ExecStart={{ openflux.argv | join(' ') }}
+ExecStart={{ openflux.argv | map('quote') | join(' ') }}
 Restart=always
 RestartSec=5
 StandardOutput=journal

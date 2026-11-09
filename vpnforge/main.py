@@ -1,4 +1,4 @@
-"""FastAPI control plane (no UI). Routes never touch the filesystem directly."""
+"""FastAPI control plane and local web UI for bypass."""
 
 from __future__ import annotations
 
@@ -14,7 +14,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
@@ -51,7 +56,7 @@ from vpnforge.models import (
     SecretsIpRequest,
     VPSConnection,
 )
-from vpnforge.openflux_manager import OpenFluxError, parse_session_b64
+from vpnforge.openflux_manager import OpenFluxError, build_client_command, parse_session_b64
 from vpnforge.secrets_store import SecretsError, SecretsInvalid, SecretsNotFound, SecretsStore
 
 logger = logging.getLogger("vpnforge")
@@ -91,7 +96,8 @@ class DeployJob:
     _queues: list[asyncio.Queue[dict[str, str] | None]] = field(default_factory=list)
 
     def emit(self, event: str, data: str) -> None:
-        item = {"event": event, "data": data}
+        payload = json.dumps({"line": data}, ensure_ascii=False) if event == "log" else data
+        item = {"event": event, "data": payload}
         self.history.append(item)
         for q in list(self._queues):
             q.put_nowait(item)
@@ -153,7 +159,7 @@ def create_app(
     cf_factory = cf_factory or (lambda token: CloudflareDNS(token))
     ctx = AppContext(settings, store, clients, runner, cf_factory)
 
-    app = FastAPI(title="VPN-Forge", docs_url=None, redoc_url=None)
+    app = FastAPI(title="bypass", docs_url=None, redoc_url=None)
     app.state.ctx = ctx
 
     # Mount static files
@@ -269,6 +275,8 @@ def create_app(
 
     @app.get("/api/clients")
     async def clients_list(ip: str = Query(...)) -> list[Client]:
+        if not ctx.store.exists(ip):
+            return []
         return ctx.clients.list_clients(ip)
 
     @app.post("/api/clients")
@@ -317,12 +325,26 @@ def create_app(
         if req.protocols.hysteria2:
             if not req.domain:
                 raise ApiError("validation_error", "hysteria2 requires domain", 422)
-            if not fc_bytes or not pk_bytes:
+            if req.certificate_source == "upload" and (not fc_bytes or not pk_bytes):
                 raise ApiError(
                     "validation_error",
                     "hysteria2 requires fullchain and privkey files",
                     422,
                 )
+            if req.certificate_source == "vps":
+                if not req.vps_fullchain_path or not req.vps_privkey_path:
+                    raise ApiError(
+                        "validation_error",
+                        "VPS certificate paths are required",
+                        422,
+                    )
+                for cert_path in (req.vps_fullchain_path, req.vps_privkey_path):
+                    if not cert_path.startswith("/") or "\x00" in cert_path:
+                        raise ApiError(
+                            "validation_error",
+                            "VPS certificate paths must be absolute Linux paths",
+                            422,
+                        )
 
         job_id = uuid.uuid4().hex
         job = DeployJob(job_id=job_id, status="pending")
@@ -358,7 +380,7 @@ def create_app(
         job = ctx.jobs.get(job_id)
         if job is None:
             raise ApiError("job_not_found", f"job {job_id} not found", 404)
-        
+
         # Note: This is a simplified cancel - in production you'd want to actually
         # cancel the running Ansible process. For now, we'll just mark it as cancelled.
         job.finish("cancelled", error="Deployment cancelled by user")
@@ -377,6 +399,40 @@ def create_app(
                 return sub_builder.encode_subscription(urls)
         raise HTTPException(status_code=404, detail="not found")
 
+    @app.get("/api/config/{sub_token}/xray.json")
+    async def local_xray_config(sub_token: str) -> Response:
+        for ip in ctx.store.list_ips():
+            secrets = ctx.store.load(ip)
+            for client in secrets.clients:
+                if client.sub_token != sub_token:
+                    continue
+                if client.disabled:
+                    raise HTTPException(status_code=404, detail="not found")
+                content = sub_builder.dump_xray_client_config(secrets, client)
+                return Response(
+                    content=content,
+                    media_type="application/json",
+                    headers={
+                        "Content-Disposition": (
+                            f'attachment; filename="bypass-{client.id[:8]}-xray.json"'
+                        )
+                    },
+                )
+        raise HTTPException(status_code=404, detail="not found")
+
+    @app.get("/api/openflux/client")
+    async def openflux_client(ip: str = Query(...)) -> dict[str, str | None]:
+        secrets = ctx.store.load(ip)
+        if not secrets.protocols.openflux:
+            raise ApiError("openflux_disabled", "OpenFlux is not enabled for this VPS", 404)
+        return {
+            "transport": secrets.openflux.transport,
+            "mode": secrets.openflux.mode,
+            "codec": secrets.openflux.codec,
+            "command": build_client_command(secrets),
+            "encryption_key": secrets.openflux.encryption_key,
+        }
+
     return app
 
 
@@ -389,6 +445,7 @@ def _root_domain_from_fqdn(fqdn: str) -> str:
 
 def _ensure_protocol_secrets(secrets: Secrets, req: DeployRequest) -> None:
     secrets.protocols = req.protocols
+    secrets.routing = req.routing
     if req.domain:
         secrets.domain = req.domain
     if req.protocols.vless_reality and secrets.reality is None:
@@ -398,6 +455,13 @@ def _ensure_protocol_secrets(secrets: Secrets, req: DeployRequest) -> None:
             public_key=pub,
             short_id=crypto_utils.generate_short_id(),
         )
+    elif req.protocols.vless_reality and secrets.reality is not None:
+        if (
+            secrets.reality.dest == "www.microsoft.com:443"
+            and secrets.reality.server_name == "www.microsoft.com"
+        ):
+            secrets.reality.dest = "www.apple.com:443"
+            secrets.reality.server_name = "www.apple.com"
     if req.protocols.hysteria2 and secrets.hysteria2 is None:
         secrets.hysteria2 = Hysteria2Config(
             obfs_password=crypto_utils.generate_obfs_password(),
@@ -441,11 +505,15 @@ async def _run_deploy(
         os.chmod(run_dir, 0o700)
 
         if req.protocols.hysteria2:
-            assert fullchain is not None and privkey is not None and req.domain
-            job.emit("log", "validating certificate")
-            cert_info = cert_validator.validate_cert_bytes(
-                fullchain, privkey, req.domain
-            )
+            assert req.domain
+            if req.certificate_source == "upload":
+                assert fullchain is not None and privkey is not None
+                job.emit("log", "validating uploaded certificate")
+                cert_info = cert_validator.validate_cert_bytes(
+                    fullchain, privkey, req.domain
+                )
+            else:
+                job.emit("log", "certificate will be validated on VPS")
 
             token = req.cf_api_token or ctx.settings.cf_api_token
             if token:
@@ -475,6 +543,8 @@ async def _run_deploy(
 
         _ensure_protocol_secrets(secrets, req)
         _apply_cert_state(secrets, cert_info)
+        if req.protocols.hysteria2 and req.certificate_source == "vps":
+            secrets.cert = CertState()
         if pending_cf is not None:
             secrets.cloudflare.zone_id, secrets.cloudflare.record_id = pending_cf
 
@@ -505,6 +575,9 @@ async def _run_deploy(
             secrets,
             cert_info,
             runtime=req.runtime,
+            certificate_source=req.certificate_source,
+            vps_fullchain_path=req.vps_fullchain_path,
+            vps_privkey_path=req.vps_privkey_path,
             fullchain_b64=inventory_builder.encode_pem_b64(fullchain)
             if fullchain
             else None,

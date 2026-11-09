@@ -23,8 +23,9 @@ class ProtocolFlags(BaseModel):
     openflux: bool = False
 
 
-OpenFluxTransport = Literal["cupsonline", "yandex", "oneme"]
-OpenFluxMode = Literal["proxy", "raw"]
+OpenFluxTransport = Literal["cupsonline", "yandex", "vyandex", "oneme", "mailru"]
+OpenFluxMode = Literal["l3", "l4"]
+OpenFluxCodec = Literal["batched", "legacy"]
 
 
 class OpenFluxConfig(BaseModel):
@@ -32,10 +33,11 @@ class OpenFluxConfig(BaseModel):
 
     Upstream: https://github.com/p1neappleXpress/OpenFlux
 
-    Fields mirror the CLI flags of `universal-bypass-tool`:
+    Fields mirror the CLI flags of current `openflux` releases:
       * transport    -> --transport
-      * mode         -> --mode
-      * local_ip     -> --local-ip (raw mode only)
+      * mode         -> --mode (l3 / l4)
+      * codec        -> --codec
+      * local_ip     -> --local-ip (l3 mode only)
       * yandex_url   -> --url      (yandex transport only)
       * max_token    -> --maxToken (oneme transport only)
       * max_uid      -> --maxUid   (oneme transport only)
@@ -54,8 +56,12 @@ class OpenFluxConfig(BaseModel):
         validation_alias=AliasChoices("transport"),
     )
     mode: OpenFluxMode = Field(
-        default="proxy",
+        default="l4",
         validation_alias=AliasChoices("mode"),
+    )
+    codec: OpenFluxCodec = Field(
+        default="batched",
+        validation_alias=AliasChoices("codec"),
     )
     local_ip: str | None = Field(
         default=None,
@@ -86,6 +92,15 @@ class OpenFluxConfig(BaseModel):
         validation_alias=AliasChoices("debug"),
     )
 
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _migrate_legacy_mode(cls, value: object) -> object:
+        if value == "proxy":
+            return "l4"
+        if value == "raw":
+            return "l3"
+        return value
+
 
 class RealityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -93,8 +108,8 @@ class RealityConfig(BaseModel):
     private_key: str
     public_key: str
     short_id: str
-    dest: str = "www.microsoft.com:443"
-    server_name: str = "www.microsoft.com"
+    dest: str = "www.apple.com:443"
+    server_name: str = "www.apple.com"
     fingerprint: str = "chrome"
     spider_x: str = "/"
     xhttp_path: str = "/"
@@ -106,6 +121,26 @@ class Hysteria2Config(BaseModel):
 
     obfs_password: str
     masquerade_url: str = "https://apple.com"
+
+
+class ClientRoutingConfig(BaseModel):
+    """Routing embedded into generated full client profiles."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ru_direct: bool = True
+    private_direct: bool = True
+    custom_direct_domains: list[str] = Field(default_factory=list)
+
+    @field_validator("custom_direct_domains")
+    @classmethod
+    def _normalize_domains(cls, values: list[str]) -> list[str]:
+        result: list[str] = []
+        for value in values:
+            domain = value.strip().lower().rstrip(".")
+            if domain and domain not in result:
+                result.append(domain)
+        return result
 
 
 class Client(BaseModel):
@@ -159,6 +194,7 @@ class Secrets(BaseModel):
     openflux: OpenFluxConfig = Field(default_factory=OpenFluxConfig)
     reality: RealityConfig | None = None
     hysteria2: Hysteria2Config | None = None
+    routing: ClientRoutingConfig = Field(default_factory=ClientRoutingConfig)
 
     clients: list[Client] = Field(default_factory=list)
     cloudflare: CloudflareState = Field(default_factory=CloudflareState)
@@ -194,6 +230,7 @@ class VPSConnection(BaseModel):
 
 
 RuntimeKind = Literal["native", "docker"]
+CertificateSource = Literal["upload", "vps"]
 
 
 class ErrorBody(BaseModel):
@@ -258,7 +295,11 @@ class DeployRequest(BaseModel):
     root_domain: str | None = None
     protocols: ProtocolFlags
     runtime: RuntimeKind = "native"
+    certificate_source: CertificateSource = "upload"
+    vps_fullchain_path: str | None = None
+    vps_privkey_path: str | None = None
     openflux: OpenFluxConfig | None = None
+    routing: ClientRoutingConfig = Field(default_factory=ClientRoutingConfig)
     cf_api_token: str | None = None
 
     @field_validator("protocols")

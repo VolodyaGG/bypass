@@ -34,15 +34,14 @@ def build_vless_url(secrets: Secrets, client: Client) -> str:
     label = _fragment_label(client.label, secrets.domain or secrets.ip, "reality")
 
     params = {
-        "type": "xhttp",
+        "type": "tcp",
         "security": "reality",
+        "flow": "xtls-rprx-vision",
         "pbk": r.public_key,
         "fp": r.fingerprint,
         "sni": r.server_name,
         "sid": r.short_id,
         "spx": r.spider_x,
-        "path": r.xhttp_path,
-        "mode": r.xhttp_mode,
     }
 
     query = urlencode(params, quote_via=quote, safe="")
@@ -70,10 +69,9 @@ def build_hysteria_url(secrets: Secrets, client: Client) -> str:
     }
     query = urlencode(params, quote_via=quote, safe="")
 
-    user = quote(client.hysteria_user, safe="")
-    pw = quote(client.hysteria_pass, safe="")
+    auth = quote(f"{client.hysteria_user}:{client.hysteria_pass}", safe="")
 
-    return f"hysteria2://{user}:{pw}@{host}:443?{query}#{quote(label)}"
+    return f"hysteria2://{auth}@{host}:443/?{query}#{quote(label)}"
 
 
 def encode_subscription(urls: list[str]) -> str:
@@ -96,6 +94,134 @@ def build_subscription_for_client(secrets: Secrets, client: Client) -> list[str]
     return urls
 
 
+def build_xray_client_config(secrets: Secrets, client: Client) -> dict[str, Any]:
+    """Build a complete Xray client profile with Russian traffic sent direct."""
+    if client.disabled:
+        raise SubBuildError("client is disabled")
+    if not secrets.protocols.vless_reality or secrets.reality is None:
+        raise SubBuildError("VLESS Reality is required for an Xray profile")
+
+    reality = secrets.reality
+    host = secrets.domain or secrets.ip
+    direct_rules: list[dict[str, Any]] = []
+
+    if secrets.routing.private_direct:
+        direct_rules.extend(
+            [
+                {
+                    "type": "field",
+                    "ip": ["geoip:private"],
+                    "outboundTag": "direct",
+                },
+                {
+                    "type": "field",
+                    "domain": ["geosite:private"],
+                    "outboundTag": "direct",
+                },
+            ]
+        )
+
+    if secrets.routing.ru_direct:
+        direct_rules.extend(
+            [
+                {
+                    "type": "field",
+                    "domain": ["geosite:category-ru"],
+                    "outboundTag": "direct",
+                },
+                {
+                    "type": "field",
+                    "ip": ["geoip:ru"],
+                    "outboundTag": "direct",
+                },
+            ]
+        )
+
+    if secrets.routing.custom_direct_domains:
+        direct_rules.append(
+            {
+                "type": "field",
+                "domain": [
+                    f"domain:{domain}"
+                    for domain in secrets.routing.custom_direct_domains
+                ],
+                "outboundTag": "direct",
+            }
+        )
+
+    return {
+        "log": {"loglevel": "warning"},
+        "inbounds": [
+            {
+                "tag": "socks-in",
+                "listen": "127.0.0.1",
+                "port": 10808,
+                "protocol": "socks",
+                "settings": {"udp": True},
+                "sniffing": {
+                    "enabled": True,
+                    "destOverride": ["http", "tls", "quic"],
+                    "routeOnly": True,
+                },
+            }
+        ],
+        "outbounds": [
+            {
+                "tag": "proxy",
+                "protocol": "vless",
+                "settings": {
+                    "vnext": [
+                        {
+                            "address": host,
+                            "port": 443,
+                            "users": [
+                                {
+                                    "id": client.vless_uuid,
+                                    "encryption": "none",
+                                    "flow": "xtls-rprx-vision",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "streamSettings": {
+                    "network": "tcp",
+                    "tcpSettings": {"header": {"type": "none"}},
+                    "security": "reality",
+                    "realitySettings": {
+                        "serverName": reality.server_name,
+                        "fingerprint": reality.fingerprint,
+                        "password": reality.public_key,
+                        "shortId": reality.short_id,
+                        "spiderX": reality.spider_x,
+                    },
+                },
+            },
+            {"tag": "direct", "protocol": "freedom"},
+            {"tag": "block", "protocol": "blackhole"},
+        ],
+        "routing": {
+            "domainStrategy": "IPIfNonMatch",
+            "rules": [
+                *direct_rules,
+                {
+                    "type": "field",
+                    "network": "tcp,udp",
+                    "outboundTag": "proxy",
+                },
+            ],
+        },
+    }
+
+
+def dump_xray_client_config(secrets: Secrets, client: Client) -> str:
+    return json.dumps(
+        build_xray_client_config(secrets, client),
+        indent=2,
+        ensure_ascii=False,
+    )
+
+
 # ---------- clients.json ----------
 
 
@@ -116,6 +242,9 @@ def build_clients_json(secrets: Secrets) -> dict[str, Any]:
                 "label": c.label,
                 "sub_token": c.sub_token,
                 "urls": urls,
+                "xray_config": build_xray_client_config(secrets, c)
+                if secrets.protocols.vless_reality
+                else None,
             }
         )
 
@@ -129,6 +258,7 @@ def build_clients_json(secrets: Secrets) -> dict[str, Any]:
             "vless_reality": secrets.protocols.vless_reality,
             "hysteria2": secrets.protocols.hysteria2,
         },
+        "routing": secrets.routing.model_dump(mode="json"),
         "clients": clients_out,
     }
     return doc

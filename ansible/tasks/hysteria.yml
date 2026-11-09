@@ -1,5 +1,6 @@
 ---
 - name: Write TLS fullchain
+  when: hysteria2.certificate_source == "upload"
   ansible.builtin.copy:
     content: "{{ hysteria2.fullchain_b64 | b64decode }}"
     dest: /etc/vpnforge/certs/fullchain.pem
@@ -9,6 +10,7 @@
   no_log: true
 
 - name: Write TLS private key
+  when: hysteria2.certificate_source == "upload"
   ansible.builtin.copy:
     content: "{{ hysteria2.privkey_b64 | b64decode }}"
     dest: /etc/vpnforge/certs/privkey.pem
@@ -16,6 +18,81 @@
     group: root
     mode: "0600"
   no_log: true
+
+- name: Validate existing certificate on VPS
+  when: hysteria2.certificate_source == "vps"
+  block:
+    - name: Check existing TLS certificate
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ hysteria2.vps_fullchain_path }}"
+          - -noout
+          - -checkend
+          - "0"
+      changed_when: false
+
+    - name: Check certificate domain
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ hysteria2.vps_fullchain_path }}"
+          - -noout
+          - -checkhost
+          - "{{ vpnforge.server_domain }}"
+      changed_when: false
+
+    - name: Read certificate public key
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - "{{ hysteria2.vps_fullchain_path }}"
+          - -pubkey
+          - -noout
+      changed_when: false
+      register: vpnforge_certificate_public_key
+
+    - name: Read private key public part
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - pkey
+          - -in
+          - "{{ hysteria2.vps_privkey_path }}"
+          - -pubout
+      changed_when: false
+      register: vpnforge_private_key_public_part
+
+    - name: Verify certificate and private key match
+      ansible.builtin.assert:
+        that:
+          - vpnforge_certificate_public_key.stdout == vpnforge_private_key_public_part.stdout
+        fail_msg: Certificate and private key on VPS do not match
+
+    - name: Copy existing TLS fullchain into bypass
+      ansible.builtin.copy:
+        src: "{{ hysteria2.vps_fullchain_path }}"
+        dest: /etc/vpnforge/certs/fullchain.pem
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Copy existing TLS private key into bypass
+      ansible.builtin.copy:
+        src: "{{ hysteria2.vps_privkey_path }}"
+        dest: /etc/vpnforge/certs/privkey.pem
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
 
 - name: Write Hysteria config
   ansible.builtin.copy:

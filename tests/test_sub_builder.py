@@ -10,6 +10,7 @@ import pytest
 
 from vpnforge.models import (
     Client,
+    ClientRoutingConfig,
     Hysteria2Config,
     ProtocolFlags,
     RealityConfig,
@@ -21,6 +22,7 @@ from vpnforge.sub_builder import (
     build_hysteria_url,
     build_subscription_for_client,
     build_vless_url,
+    build_xray_client_config,
     dump_clients_json,
     encode_subscription,
 )
@@ -111,15 +113,16 @@ def test_vless_url_query_params() -> None:
     parsed = urlparse(url)
     q = parse_qs(parsed.query, keep_blank_values=True)
 
-    assert q["type"] == ["xhttp"]
+    assert q["type"] == ["tcp"]
     assert q["security"] == ["reality"]
+    assert q["flow"] == ["xtls-rprx-vision"]
     assert q["pbk"] == ["PUBLIC_KEY_OK_TO_LEAK"]
     assert q["fp"] == ["chrome"]
     assert q["sni"] == ["www.microsoft.com"]
     assert q["sid"] == ["deadbeef"]
     assert q["spx"] == ["/"]
-    assert q["path"] == ["/"]
-    assert q["mode"] == ["packet-up"]
+    assert "path" not in q
+    assert "mode" not in q
 
 
 def test_vless_url_does_not_contain_private_key() -> None:
@@ -150,11 +153,10 @@ def test_vless_url_fragment_encodes_spaces() -> None:
 
 
 def test_vless_url_slash_encoded_in_params() -> None:
-    """path=/ and spx=/ must appear as %2F in the raw URL."""
+    """The Reality spider path remains escaped in the raw URL."""
     c = _client("Vasya", UUID_A, "vasya", "pw")
     url = build_vless_url(_secrets([c]), c)
     raw_query = url.split("?", 1)[1].split("#", 1)[0]
-    assert "path=%2F" in raw_query
     assert "spx=%2F" in raw_query
 
 
@@ -171,7 +173,7 @@ def test_vless_url_raises_without_reality() -> None:
 def test_hysteria_url_basic_shape() -> None:
     c = _client("Вася", UUID_A, "vasya", "pw-secret")
     url = build_hysteria_url(_secrets([c]), c)
-    assert url.startswith("hysteria2://vasya:pw-secret@node1.example.com:443?")
+    assert url.startswith("hysteria2://vasya%3Apw-secret@node1.example.com:443/?")
     assert "#" in url
 
 
@@ -206,8 +208,7 @@ def test_hysteria_url_encodes_special_chars_in_password() -> None:
     url = build_hysteria_url(_secrets([c]), c)
     # password must be percent-encoded in the userinfo part
     userinfo = url.split("://", 1)[1].split("@", 1)[0]
-    assert "vasya:" in userinfo
-    assert "p%2Fw%3Ad%3Fe" in userinfo
+    assert userinfo == "vasya%3Ap%2Fw%3Ad%3Fe"
 
 
 # ---------- build_subscription_for_client ----------
@@ -241,6 +242,53 @@ def test_subscription_disabled_client_empty() -> None:
     c = _client("Вася", UUID_A, "vasya", "pw", disabled=True)
     urls = build_subscription_for_client(_secrets([c]), c)
     assert urls == []
+
+
+# ---------- full Xray client profile ----------
+
+
+def test_xray_client_config_routes_ru_direct() -> None:
+    client = _client("Вася", UUID_A, "vasya", "pw")
+    config = build_xray_client_config(_secrets([client]), client)
+
+    rules = config["routing"]["rules"]
+    assert any(rule.get("domain") == ["geosite:category-ru"] for rule in rules)
+    assert any(rule.get("ip") == ["geoip:ru"] for rule in rules)
+    assert rules[-1]["outboundTag"] == "proxy"
+
+
+def test_xray_client_config_custom_direct_domains() -> None:
+    client = _client("Вася", UUID_A, "vasya", "pw")
+    secrets = _secrets([client])
+    secrets.routing = ClientRoutingConfig(
+        ru_direct=False,
+        private_direct=False,
+        custom_direct_domains=["Bank.Example.RU.", "work.example.com"],
+    )
+    config = build_xray_client_config(secrets, client)
+    rules = config["routing"]["rules"]
+
+    assert rules[0]["domain"] == [
+        "domain:bank.example.ru",
+        "domain:work.example.com",
+    ]
+    assert all("geoip:ru" not in rule.get("ip", []) for rule in rules)
+
+
+def test_xray_client_config_contains_no_private_key() -> None:
+    client = _client("Вася", UUID_A, "vasya", "pw")
+    config = build_xray_client_config(_secrets([client]), client)
+    dumped = json.dumps(config)
+    assert "PRIVATE_KEY_MUST_NOT_LEAK" not in dumped
+    assert "PUBLIC_KEY_OK_TO_LEAK" in dumped
+    reality = config["outbounds"][0]["streamSettings"]["realitySettings"]
+    assert reality["password"] == "PUBLIC_KEY_OK_TO_LEAK"
+    assert "publicKey" not in reality
+    assert config["outbounds"][0]["streamSettings"]["network"] == "tcp"
+    assert config["outbounds"][0]["streamSettings"]["tcpSettings"] == {
+        "header": {"type": "none"}
+    }
+    assert config["outbounds"][0]["settings"]["vnext"][0]["users"][0]["flow"] == "xtls-rprx-vision"
 
 
 # ---------- encode_subscription ----------
@@ -281,6 +329,7 @@ def test_clients_json_structure() -> None:
     assert doc["version"] == 1
     assert doc["server"] == {"ip": "1.2.3.4", "domain": "node1.example.com"}
     assert doc["protocols"] == {"vless_reality": True, "hysteria2": True}
+    assert doc["routing"]["ru_direct"] is True
     assert len(doc["clients"]) == 1
 
     entry = doc["clients"][0]
@@ -288,6 +337,7 @@ def test_clients_json_structure() -> None:
     assert entry["label"] == "Вася"
     assert entry["sub_token"] == "t" * 32
     assert len(entry["urls"]) == 2
+    assert entry["xray_config"]["routing"]["domainStrategy"] == "IPIfNonMatch"
 
 
 def test_clients_json_excludes_disabled() -> None:
@@ -322,7 +372,7 @@ def test_clients_json_has_no_server_secrets() -> None:
     c = _client("Вася", UUID_A, "vasya", "pw")
     doc = build_clients_json(_secrets([c]))
     # top-level must only contain these keys
-    assert set(doc.keys()) == {"version", "server", "protocols", "clients"}
+    assert set(doc.keys()) == {"version", "server", "protocols", "routing", "clients"}
 
 
 def test_dump_clients_json_is_valid_json() -> None:
@@ -363,6 +413,11 @@ def test_golden_clients_json_single_client() -> None:
         "version": 1,
         "server": {"ip": "1.2.3.4", "domain": "node1.example.com"},
         "protocols": {"vless_reality": True, "hysteria2": True},
+        "routing": {
+            "ru_direct": True,
+            "private_direct": True,
+            "custom_direct_domains": [],
+        },
         "clients": [
             {
                 "id": "cid-1",
@@ -372,6 +427,7 @@ def test_golden_clients_json_single_client() -> None:
                     build_vless_url(_secrets([c]), c),
                     build_hysteria_url(_secrets([c]), c),
                 ],
+                "xray_config": build_xray_client_config(_secrets([c]), c),
             }
         ],
     }

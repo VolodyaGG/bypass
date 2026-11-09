@@ -17,7 +17,7 @@ from httpx import ASGITransport, AsyncClient
 
 from vpnforge.config import Settings
 from vpnforge.main import DeployJob, create_app
-from vpnforge.models import ProtocolFlags, Secrets
+from vpnforge.models import OpenFluxConfig, ProtocolFlags, RealityConfig, Secrets
 from vpnforge.secrets_store import SecretsStore
 from vpnforge.vps_sub_server.app import app as sub_app
 
@@ -137,6 +137,13 @@ async def test_health(client_app: Any) -> None:
     r = await ac.get("/api/health")
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
+
+
+async def test_clients_list_before_first_deploy_is_empty(client_app: Any) -> None:
+    ac, _, _ = client_app
+    response = await ac.get("/api/clients", params={"ip": "88.214.54.179"})
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 async def test_cert_validate(client_app: Any, tmp_path: Path) -> None:
@@ -301,6 +308,53 @@ async def test_sub_unknown_token(client_app: Any) -> None:
     assert r.status_code == 404
 
 
+async def test_xray_config_has_ru_direct_routing(client_app: Any) -> None:
+    ac, app, _ = client_app
+    store: SecretsStore = app.state.ctx.store
+    secrets = Secrets(
+        ip="1.2.3.4",
+        protocols=ProtocolFlags(vless_reality=True),
+        reality=RealityConfig(
+            private_key="private",
+            public_key="public",
+            short_id="deadbeef",
+        ),
+    )
+    store.save(secrets)
+    created = await ac.post("/api/clients", json={"ip": "1.2.3.4", "label": "Phone"})
+    token = created.json()["sub_token"]
+
+    response = await ac.get(f"/api/config/{token}/xray.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    rules = response.json()["routing"]["rules"]
+    assert any(rule.get("domain") == ["geosite:category-ru"] for rule in rules)
+    assert any(rule.get("ip") == ["geoip:ru"] for rule in rules)
+
+
+async def test_openflux_client_setup_uses_saved_session(client_app: Any) -> None:
+    ac, app, _ = client_app
+    app.state.ctx.store.save(
+        Secrets(
+            ip="1.2.3.4",
+            protocols=ProtocolFlags(openflux=True),
+            openflux=OpenFluxConfig(
+                transport="cupsonline",
+                session_b64="c2Vzc2lvbi1kYXRhLWZvci1jbGllbnQ=",
+                encryption_key="shared-secret",
+            ),
+        )
+    )
+
+    response = await ac.get("/api/openflux/client", params={"ip": "1.2.3.4"})
+
+    assert response.status_code == 200
+    assert "--role client" in response.json()["command"]
+    assert "--codec batched" in response.json()["command"]
+    assert response.json()["encryption_key"] == "shared-secret"
+
+
 # ---------- deploy ----------
 
 
@@ -327,6 +381,8 @@ async def test_deploy_vless_only(client_app: Any) -> None:
     assert secrets.reality is not None
     assert secrets.clients[0].label == "default"
     assert secrets.reality.private_key  # persisted, not empty
+    assert secrets.reality.dest == "www.apple.com:443"
+    assert secrets.reality.server_name == "www.apple.com"
 
 
 async def test_deploy_does_not_rotate_keys(client_app: Any) -> None:
@@ -353,6 +409,37 @@ async def test_deploy_does_not_rotate_keys(client_app: Any) -> None:
     assert second is not None
     assert first.private_key == second.private_key
     assert first.public_key == second.public_key
+
+
+async def test_deploy_migrates_old_reality_target_without_rotating_keys(
+    client_app: Any,
+) -> None:
+    ac, app, _ = client_app
+    secrets = Secrets(
+        ip="1.2.3.4",
+        protocols=ProtocolFlags(vless_reality=True),
+        reality=RealityConfig(
+            private_key="existing-private-key",
+            public_key="existing-public-key",
+            short_id="deadbeef",
+            dest="www.microsoft.com:443",
+            server_name="www.microsoft.com",
+        ),
+    )
+    app.state.ctx.store.save(secrets)
+    payload = json.dumps(
+        {"ip": "1.2.3.4", "protocols": {"vless_reality": True}}
+    )
+    response = await ac.post("/api/deploy", data={"payload": payload})
+    job = await _wait_job(app, response.json()["job_id"])
+    assert job.status == "success"
+    reality = app.state.ctx.store.load("1.2.3.4").reality
+    assert reality is not None
+    assert reality.dest == "www.apple.com:443"
+    assert reality.server_name == "www.apple.com"
+    assert reality.private_key == "existing-private-key"
+    assert reality.public_key == "existing-public-key"
+    assert reality.short_id == "deadbeef"
 
 
 async def test_deploy_hysteria_needs_certs(client_app: Any) -> None:
@@ -401,6 +488,59 @@ async def test_deploy_hysteria_with_certs(client_app: Any, tmp_path: Path) -> No
     assert secrets.hysteria2 is not None
     assert secrets.cloudflare.zone_id == "zone-1"
     assert secrets.cert.sha256
+
+
+async def test_deploy_hysteria_with_existing_vps_certs(client_app: Any) -> None:
+    ac, app, _ = client_app
+    payload = json.dumps(
+        {
+            "ip": "1.2.3.4",
+            "domain": "node1.example.com",
+            "certificate_source": "vps",
+            "vps_fullchain_path": "/etc/letsencrypt/live/node1.example.com/fullchain.pem",
+            "vps_privkey_path": "/etc/letsencrypt/live/node1.example.com/privkey.pem",
+            "protocols": {
+                "hysteria2": True,
+                "vless_reality": False,
+                "openflux": False,
+            },
+        }
+    )
+    response = await ac.post("/api/deploy", data={"payload": payload})
+    assert response.status_code == 202, response.text
+    job = await _wait_job(app, response.json()["job_id"])
+    assert job.status == "success"
+
+
+@pytest.mark.parametrize(
+    ("fullchain_path", "privkey_path"),
+    [
+        (None, "/etc/letsencrypt/live/node1.example.com/privkey.pem"),
+        ("relative/fullchain.pem", "/etc/letsencrypt/live/node1.example.com/privkey.pem"),
+    ],
+)
+async def test_deploy_hysteria_rejects_bad_vps_cert_paths(
+    client_app: Any,
+    fullchain_path: str | None,
+    privkey_path: str,
+) -> None:
+    ac, _, _ = client_app
+    payload = json.dumps(
+        {
+            "ip": "1.2.3.4",
+            "domain": "node1.example.com",
+            "certificate_source": "vps",
+            "vps_fullchain_path": fullchain_path,
+            "vps_privkey_path": privkey_path,
+            "protocols": {
+                "hysteria2": True,
+                "vless_reality": False,
+                "openflux": False,
+            },
+        }
+    )
+    response = await ac.post("/api/deploy", data={"payload": payload})
+    assert response.status_code == 422
 
 
 async def test_deploy_openflux_parses_session(tmp_path: Path) -> None:
@@ -479,6 +619,12 @@ async def test_deploy_stream_unknown(client_app: Any) -> None:
     assert r.status_code == 404
 
 
+def test_deploy_job_serializes_log_events_for_frontend() -> None:
+    job = DeployJob(job_id="job-1")
+    job.emit("log", "проверка подключения")
+    assert json.loads(job.history[0]["data"]) == {"line": "проверка подключения"}
+
+
 async def test_deploy_invalid_payload(client_app: Any) -> None:
     ac, _, _ = client_app
     r = await ac.post("/api/deploy", data={"payload": "{"})
@@ -529,6 +675,7 @@ async def test_vps_sub_found_and_missing(tmp_path: Path, monkeypatch: pytest.Mon
                 "label": "Вася",
                 "sub_token": "aa" * 16,
                 "urls": ["vless://x", "hysteria2://y"],
+                "xray_config": {"routing": {"rules": []}},
             }
         ],
     }
@@ -545,6 +692,9 @@ async def test_vps_sub_found_and_missing(tmp_path: Path, monkeypatch: pytest.Mon
 
         decoded = base64.b64decode(r.text).decode()
         assert "vless://x" in decoded
+        profile = await ac.get(f"/config/{'aa' * 16}/xray.json")
+        assert profile.status_code == 200
+        assert profile.json()["routing"]["rules"] == []
         missing = await ac.get("/sub/not-a-token")
         assert missing.status_code == 404
 

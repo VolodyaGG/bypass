@@ -5,23 +5,137 @@
     - name: Xray is active
       ansible.builtin.command: systemctl is-active vpnforge-xray
       changed_when: false
+      register: xray_active
+      until: xray_active.stdout == "active"
+      retries: 15
+      delay: 2
       when: protocols.vless_reality | default(false)
+
+    - name: Xray listens on its public port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 443
+        timeout: 30
+      when: protocols.vless_reality | default(false)
+
+    - name: Verify VLESS Reality with a real proxied request
+      when: protocols.vless_reality | default(false)
+      block:
+        - name: Write temporary Xray verification client
+          ansible.builtin.template:
+            src: templates/verify-xray-client.json.j2
+            dest: /etc/vpnforge/verify-xray-client.json
+            owner: root
+            group: root
+            mode: "0600"
+          no_log: true
+
+        - name: Request public IP through VLESS Reality
+          ansible.builtin.shell: |
+            /usr/local/bin/xray run -c /etc/vpnforge/verify-xray-client.json >/dev/null 2>&1 &
+            verify_pid=$!
+            trap 'kill "$verify_pid" 2>/dev/null || true' EXIT
+            sleep 1
+            curl --fail --silent --show-error --max-time 15 --proxy socks5h://127.0.0.1:11808 https://api.ipify.org
+          args:
+            executable: /bin/bash
+          register: xray_proxy_check
+          changed_when: false
+          until: xray_proxy_check.rc == 0 and xray_proxy_check.stdout == vpnforge.server_ip
+          retries: 3
+          delay: 2
+      always:
+        - name: Remove temporary Xray verification client
+          ansible.builtin.file:
+            path: /etc/vpnforge/verify-xray-client.json
+            state: absent
+          no_log: true
 
     - name: Hysteria is active
       ansible.builtin.command: systemctl is-active vpnforge-hysteria
       changed_when: false
+      register: hysteria_active
+      until: hysteria_active.stdout == "active"
+      retries: 15
+      delay: 2
       when: protocols.hysteria2 | default(false)
+
+    - name: Hysteria listens on UDP 443
+      ansible.builtin.command:
+        argv:
+          - ss
+          - -H
+          - -lunp
+          - sport = :443
+      changed_when: false
+      register: hysteria_udp_listener
+      until: "'hysteria' in hysteria_udp_listener.stdout"
+      retries: 15
+      delay: 2
+      when: protocols.hysteria2 | default(false)
+
+    - name: Verify Hysteria subscription with a real proxied request
+      when: protocols.hysteria2 | default(false)
+      block:
+        - name: Write temporary Hysteria verification client
+          ansible.builtin.template:
+            src: templates/verify-hysteria-client.json.j2
+            dest: /etc/vpnforge/verify-hysteria-client.json
+            owner: root
+            group: root
+            mode: "0600"
+          no_log: true
+
+        - name: Request public IP through Hysteria
+          ansible.builtin.shell: |
+            /usr/local/bin/hysteria client -c /etc/vpnforge/verify-hysteria-client.json >/dev/null 2>&1 &
+            verify_pid=$!
+            trap 'kill "$verify_pid" 2>/dev/null || true' EXIT
+            sleep 1
+            curl --fail --silent --show-error --max-time 15 --proxy socks5h://127.0.0.1:11809 https://api.ipify.org
+          args:
+            executable: /bin/bash
+          register: hysteria_proxy_check
+          changed_when: false
+          until: hysteria_proxy_check.rc == 0 and hysteria_proxy_check.stdout == vpnforge.server_ip
+          retries: 3
+          delay: 2
+      always:
+        - name: Remove temporary Hysteria verification client
+          ansible.builtin.file:
+            path: /etc/vpnforge/verify-hysteria-client.json
+            state: absent
+          no_log: true
 
     - name: Sub-server is active
       ansible.builtin.command: systemctl is-active vpnforge-sub
       changed_when: false
+      register: sub_server_active
+      until: sub_server_active.stdout == "active"
+      retries: 15
+      delay: 2
 
-    - name: OpenFlux is active
-      ansible.builtin.command: systemctl is-active vpnforge-openflux
-      changed_when: false
-      when: protocols.openflux | default(false)
+    - name: Subscription endpoint is healthy
+      ansible.builtin.uri:
+        url: "{{ vpnforge.subscription_scheme }}://127.0.0.1:{{ vpnforge.subscription_port }}/health"
+        validate_certs: false
+        return_content: true
+        status_code: 200
+      register: subscription_health
+      until: subscription_health.json.status == "ok"
+      retries: 15
+      delay: 2
 
 - name: Check docker compose
   when: vpnforge.runtime == "docker"
   ansible.builtin.command: docker compose -f /opt/vpnforge/docker-compose.yml ps
   changed_when: false
+
+- name: OpenFlux is active
+  ansible.builtin.command: systemctl is-active vpnforge-openflux
+  changed_when: false
+  register: openflux_active
+  until: openflux_active.stdout == "active"
+  retries: 15
+  delay: 2
+  when: protocols.openflux | default(false)

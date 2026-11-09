@@ -36,6 +36,7 @@ def build_xray_config(secrets: Secrets) -> dict[str, Any]:
         {
             "id": c.vless_uuid,
             "email": _xray_email(c.label, c.id),
+            "flow": "xtls-rprx-vision",
         }
         for c in enabled_clients
     ]
@@ -44,7 +45,7 @@ def build_xray_config(secrets: Secrets) -> dict[str, Any]:
         "log": {"loglevel": "warning"},
         "inbounds": [
             {
-                "tag": "vless-reality-xhttp",
+                "tag": "vless-reality-tcp",
                 "listen": "0.0.0.0",
                 "port": 443,
                 "protocol": "vless",
@@ -53,7 +54,8 @@ def build_xray_config(secrets: Secrets) -> dict[str, Any]:
                     "decryption": "none",
                 },
                 "streamSettings": {
-                    "network": "xhttp",
+                    "network": "tcp",
+                    "tcpSettings": {"header": {"type": "none"}},
                     "security": "reality",
                     "realitySettings": {
                         "show": False,
@@ -62,10 +64,6 @@ def build_xray_config(secrets: Secrets) -> dict[str, Any]:
                         "serverNames": [r.server_name],
                         "privateKey": r.private_key,
                         "shortIds": [r.short_id],
-                    },
-                    "xhttpSettings": {
-                        "path": r.xhttp_path,
-                        "mode": r.xhttp_mode,
                     },
                 },
                 "sniffing": {

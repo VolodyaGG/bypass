@@ -1,4 +1,4 @@
-"""Subscription micro-backend. Runs on the VPS, listens on :80."""
+"""Subscription micro-backend served on a dedicated VPS port."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import os
 import pathlib
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 CLIENTS_FILE = pathlib.Path(
@@ -48,6 +48,24 @@ def get_sub(token: str) -> str:
         lines = [str(u) for u in urls]
         payload = "\n".join(lines).encode("utf-8")
         return base64.b64encode(payload).decode("ascii")
+
+    raise HTTPException(status_code=404, detail="not found")
+
+
+@app.get("/config/{token}/xray.json", response_class=JSONResponse)
+def get_xray_config(token: str) -> dict[str, object]:
+    data = _load_clients()
+    clients = data.get("clients")
+    if not isinstance(clients, list):
+        raise HTTPException(status_code=404, detail="not found")
+
+    for entry in clients:
+        if not isinstance(entry, dict) or entry.get("sub_token") != token:
+            continue
+        config = entry.get("xray_config")
+        if isinstance(config, dict):
+            return config
+        raise HTTPException(status_code=404, detail="xray profile unavailable")
 
     raise HTTPException(status_code=404, detail="not found")
 

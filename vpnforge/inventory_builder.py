@@ -65,6 +65,9 @@ def build_group_vars(
     cert: CertInfo | None,
     *,
     runtime: str = "native",
+    certificate_source: str = "upload",
+    vps_fullchain_path: str | None = None,
+    vps_privkey_path: str | None = None,
     fullchain_b64: str | None = None,
     privkey_b64: str | None = None,
     clients_json_path: str = "/opt/vpnforge/sub/clients.json",
@@ -80,7 +83,8 @@ def build_group_vars(
       secrets: loaded Secrets document for this VPS.
       cert: parsed CertInfo (None if hysteria2 disabled).
       runtime: "native" or "docker".
-      fullchain_b64 / privkey_b64: base64 of PEM files (required if hysteria2).
+      certificate_source: "upload" or files already present on "vps".
+      fullchain_b64 / privkey_b64: base64 PEM files for upload mode.
       clients_json_path: where sub_server reads clients.json on the VPS.
       openflux_env: extra env vars for the openflux service unit.
       ssh_password: passed through for convenience so caller doesn't have to
@@ -91,14 +95,19 @@ def build_group_vars(
         raise InventoryError(f"unknown runtime: {runtime!r}")
 
     if secrets.protocols.hysteria2:
-        if fullchain_b64 is None or privkey_b64 is None:
-            raise InventoryError(
-                "hysteria2 is enabled but fullchain_b64 / privkey_b64 not provided"
-            )
+        if certificate_source not in ("upload", "vps"):
+            raise InventoryError(f"unknown certificate source: {certificate_source!r}")
+        if certificate_source == "upload":
+            if fullchain_b64 is None or privkey_b64 is None:
+                raise InventoryError(
+                    "hysteria2 is enabled but fullchain_b64 / privkey_b64 not provided"
+                )
+            if cert is None:
+                raise InventoryError("hysteria2 requires parsed CertInfo")
+        elif not vps_fullchain_path or not vps_privkey_path:
+            raise InventoryError("hysteria2 requires certificate paths on VPS")
         if secrets.domain is None:
             raise InventoryError("hysteria2 requires secrets.domain")
-        if cert is None:
-            raise InventoryError("hysteria2 requires parsed CertInfo")
 
     gv: dict[str, Any] = {
         "vpnforge": {
@@ -106,6 +115,10 @@ def build_group_vars(
             "server_ip": secrets.ip,
             "server_domain": secrets.domain,
             "clients_json_path": clients_json_path,
+            "subscription_scheme": "https"
+            if secrets.protocols.hysteria2
+            else "http",
+            "subscription_port": 8444 if secrets.protocols.hysteria2 else 8080,
         },
         "protocols": {
             "hysteria2": secrets.protocols.hysteria2,
@@ -135,8 +148,11 @@ def build_group_vars(
         gv["hysteria2"] = {
             "obfs_password": secrets.hysteria2.obfs_password,
             "masquerade_url": secrets.hysteria2.masquerade_url,
+            "certificate_source": certificate_source,
             "fullchain_b64": fullchain_b64,
             "privkey_b64": privkey_b64,
+            "vps_fullchain_path": vps_fullchain_path,
+            "vps_privkey_path": vps_privkey_path,
         }
         if cert is not None:
             gv["cert"] = {
@@ -152,6 +168,7 @@ def build_group_vars(
         gv["openflux"] = {
             "transport": secrets.openflux.transport,
             "mode": secrets.openflux.mode,
+            "codec": secrets.openflux.codec,
             "local_ip": secrets.openflux.local_ip,
             "yandex_url": secrets.openflux.yandex_url,
             "max_token": secrets.openflux.max_token,
