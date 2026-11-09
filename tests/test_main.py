@@ -109,6 +109,22 @@ def _write_valid_cert(tmp_path: Path) -> tuple[Path, Path]:
     return fullchain, privkey
 
 
+TEST_PASSWORD = "testpass"
+
+
+async def _authenticate(client: AsyncClient) -> None:
+    response = await client.post(
+        "/login",
+        data={
+            "profile": "Тестовый профиль",
+            "password": TEST_PASSWORD,
+            "confirmation": TEST_PASSWORD,
+            "setup": "true",
+        },
+    )
+    assert response.status_code == 303, response.text
+
+
 @pytest.fixture()
 async def client_app(tmp_path: Path) -> Any:
     settings = Settings(data_dir=tmp_path / "data", cf_api_token="cf-token")
@@ -119,7 +135,8 @@ async def client_app(tmp_path: Path) -> Any:
         cf_factory=lambda token: FakeCF(token),
     )
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
+        await _authenticate(ac)
         yield ac, app, runner
 
 
@@ -137,6 +154,58 @@ async def test_health(client_app: Any) -> None:
     r = await ac.get("/api/health")
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
+
+
+async def test_local_profile_login_and_logout(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path / "data")
+    app = create_app(settings=settings)
+    base_url = "http://127.0.0.1"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=base_url) as ac:
+        response = await ac.get("/", cookies={"bypass_profile": "legacy"})
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login"
+        assert (await ac.get("/api/clients", params={"ip": "192.0.2.1"})).status_code == 401
+        assert (await ac.get("/api/health")).status_code == 200
+        assert "Создайте профиль" in (await ac.get("/login")).text
+        assert (await ac.post("/login", data={"profile": " "})).status_code == 422
+        assert (await ac.post(
+            "/login",
+            headers={"origin": "http://example.test"},
+            data={"profile": "Тестовый профиль"},
+        )).status_code == 403
+
+        await _authenticate(ac)
+        token = ac.cookies["bypass_session"]
+        assert TEST_PASSWORD.encode() not in (settings.data_dir / "auth/auth.sqlite3").read_bytes()
+        assert token.encode() not in (settings.data_dir / "auth/auth.sqlite3").read_bytes()
+        dashboard = await ac.get("/")
+        assert dashboard.status_code == 200
+        assert 'data-profile="Тестовый профиль"' in dashboard.text
+        assert dashboard.headers["cache-control"] == "no-store"
+
+    restarted = create_app(settings=settings)
+    async with AsyncClient(transport=ASGITransport(app=restarted), base_url=base_url) as ac:
+        ac.cookies.set("bypass_session", token)
+        assert (await ac.get("/")).status_code == 200
+        assert (await ac.post("/logout")).headers["location"] == "/login"
+        ac.cookies.set("bypass_session", token)
+        assert (await ac.get("/")).status_code == 303
+        ac.cookies.clear()
+        assert "Введите имя профиля и пароль." in (await ac.get("/login")).text
+
+        invalid = await ac.post(
+            "/login", data={"profile": "Тестовый профиль", "password": "incorrect-password"}
+        )
+        assert invalid.status_code == 401
+        assert "bypass_session" not in ac.cookies
+
+        valid = await ac.post(
+            "/login", data={"profile": "тестовый профиль", "password": TEST_PASSWORD}
+        )
+        assert valid.headers["location"] == "/"
+        assert "HttpOnly" in valid.headers["set-cookie"]
+        assert "SameSite=strict" in valid.headers["set-cookie"]
+        assert ac.cookies["bypass_session"] != token
 
 
 async def test_clients_list_before_first_deploy_is_empty(client_app: Any) -> None:
@@ -193,7 +262,8 @@ async def test_dns_upsert_no_token(tmp_path: Path) -> None:
         cf_factory=lambda token: FakeCF(token),
     )
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
+        await _authenticate(ac)
         r = await ac.post(
             "/api/dns/upsert",
             json={"fqdn": "node1.example.com", "ip": "1.2.3.4"},
@@ -576,7 +646,8 @@ async def test_deploy_openflux_parses_session(tmp_path: Path) -> None:
             "openflux": {"transport": "cupsonline", "mode": "proxy"},
         }
     )
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
+        await _authenticate(ac)
         r = await ac.post("/api/deploy", data={"payload": payload})
         job = await _wait_job(app, r.json()["job_id"])
     assert job.status == "success"
@@ -604,7 +675,8 @@ async def test_deploy_ansible_failure(tmp_path: Path) -> None:
             },
         }
     )
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
+        await _authenticate(ac)
         r = await ac.post("/api/deploy", data={"payload": payload})
         job = await _wait_job(app, r.json()["job_id"])
         stream = await ac.get(f"/api/deploy/stream/{r.json()['job_id']}")
@@ -660,7 +732,7 @@ async def test_validation_error_shape(client_app: Any) -> None:
 
 async def test_vps_sub_health() -> None:
     transport = ASGITransport(app=sub_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
         r = await ac.get("/health")
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
@@ -684,7 +756,7 @@ async def test_vps_sub_found_and_missing(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr("vpnforge.vps_sub_server.app.CLIENTS_FILE", p)
 
     transport = ASGITransport(app=sub_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
         r = await ac.get(f"/sub/{'aa' * 16}")
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/plain")
@@ -704,6 +776,6 @@ async def test_vps_sub_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         "vpnforge.vps_sub_server.app.CLIENTS_FILE", tmp_path / "nope.json"
     )
     transport = ASGITransport(app=sub_app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
         r = await ac.get("/sub/token")
     assert r.status_code == 503

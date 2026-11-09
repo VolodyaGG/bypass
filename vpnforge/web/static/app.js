@@ -1,4 +1,4 @@
-// VPN-Forge Frontend - JARVIS-style UI
+// bypass Frontend - JARVIS-style UI
 // Backend integration
 
 // State management
@@ -6,37 +6,140 @@ const state = {
     protocols: { hysteria2: false, vless_reality: false, openflux: false },
     vps: { ip: '', port: 22, user: 'root', auth: 'key', keyPath: '', password: '', runtime: 'native' },
     dns: { cfToken: '', root: '', sub: '' },
-    certs: { fullchainPath: '', privkeyPath: '', info: null },
-    openflux: { transport: null, mode: 'proxy', localIp: '', yandexUrl: '', maxToken: '', maxUid: '', encKey: '' },
-    deploy: { jobId: null, running: false, stages: {}, logs: [] },
+    certs: { source: 'upload', vpsFullchainPath: '', vpsPrivkeyPath: '', info: null },
+    openflux: { transport: null, mode: 'l4', codec: 'batched', localIp: '', yandexUrl: '', maxToken: '', maxUid: '', encKey: '' },
+    routing: { ruDirect: true, privateDirect: true, customDirectDomains: '' },
+    deploy: { jobId: null, running: false, stages: {}, logs: [], mode: 'demo' },
     clients: [],
     services: {},
     theme: 'dark',
     selectedClientId: null
 };
 
-// Initialize Lucide icons
+const formGroups = ['protocols', 'vps', 'dns', 'certs', 'openflux', 'routing'];
+const workspaceForms = { demo: Object.fromEntries(
+    formGroups.map(group => [group, { ...state[group] }])
+) };
+let deployMode = 'demo';
+let lastDemo = null;
+
+const iconPaths = {
+    shield: '<path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3Z"/><path d="m9 12 2 2 4-4"/>',
+    cpu: '<rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>',
+    globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>',
+    server: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
+    users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    'help-circle': '<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 18h.01"/>',
+    eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7C3.73 7.6 7.6 5 12 5s8.27 2.6 9.94 6.65a1 1 0 0 1 0 .7C20.27 16.4 16.4 19 12 19s-8.27-2.6-9.94-6.65"/><circle cx="12" cy="12" r="3"/>',
+    'eye-off': '<path d="m2 2 20 20M10.73 5.08A10.43 10.43 0 0 1 12 5c4.4 0 8.27 2.6 9.94 6.65a1 1 0 0 1 0 .7 10.6 10.6 0 0 1-2.11 3.19M6.61 6.61a10.73 10.73 0 0 0-4.55 5.04 1 1 0 0 0 0 .7C3.73 16.4 7.6 19 12 19a10.43 10.43 0 0 0 5.39-1.61M14.12 14.12A3 3 0 0 1 9.88 9.88"/>',
+    copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+    download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+    x: '<path d="M18 6 6 18M6 6l12 12"/>',
+    'edit-2': '<path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/>',
+    'trash-2': '<path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/>'
+};
+
+// Render bundled SVG icons without depending on an external CDN.
 function initIcons() {
-    lucide.createIcons();
+    document.querySelectorAll('[data-lucide]').forEach(element => {
+        const path = iconPaths[element.dataset.lucide];
+        if (!path) return;
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        icon.setAttribute('fill', 'none');
+        icon.setAttribute('stroke', 'currentColor');
+        icon.setAttribute('stroke-width', '2');
+        icon.setAttribute('stroke-linecap', 'round');
+        icon.setAttribute('stroke-linejoin', 'round');
+        icon.setAttribute('aria-hidden', 'true');
+        icon.setAttribute('class', element.getAttribute('class') || '');
+        if (element.getAttribute('style')) icon.setAttribute('style', element.getAttribute('style'));
+        icon.innerHTML = path;
+        element.replaceWith(icon);
+    });
 }
 
 // LocalStorage helpers
 function saveState() {
-    const toSave = { ...state };
-    delete toSave.deploy; // Don't save deploy state
-    delete toSave.services; // Don't save services (fetched from server)
-    localStorage.setItem('vpnforge-state', JSON.stringify(toSave));
+    try {
+        if (deployMode === 'demo') {
+            localStorage.setItem(demoStorageKey(), JSON.stringify({
+                ip: state.vps.ip,
+                runtime: state.vps.runtime,
+                protocols: state.protocols,
+                root: state.dns.root,
+                sub: state.dns.sub,
+                last: lastDemo
+            }));
+        } else {
+            const toSave = Object.fromEntries(formGroups.map(group => [group, state[group]]));
+            toSave.vps = { ...state.vps, password: '' };
+            toSave.dns = { ...state.dns, cfToken: '' };
+            toSave.openflux = { ...state.openflux, encKey: '' };
+            localStorage.setItem('vpnforge-state', JSON.stringify(toSave));
+        }
+    } catch (error) {
+        console.warn('Could not save workspace settings', error);
+    }
 }
 
 function loadState() {
-    const saved = localStorage.getItem('vpnforge-state');
-    if (saved) {
-        try {
-            const parsed = JSON.parse(saved);
-            Object.assign(state, parsed);
-        } catch (e) {
-            console.error('Failed to load state:', e);
+    try {
+        const parsed = JSON.parse(localStorage.getItem('vpnforge-state')) || {};
+        formGroups.forEach(group => Object.assign(state[group], parsed[group]));
+        if (state.openflux.mode === 'proxy') state.openflux.mode = 'l4';
+        if (state.openflux.mode === 'raw') state.openflux.mode = 'l3';
+        const saved = JSON.parse(localStorage.getItem(demoStorageKey()));
+        if (saved) {
+            const { vps, dns, protocols } = workspaceForms.demo;
+            vps.ip = saved.ip || '';
+            vps.runtime = saved.runtime === 'docker' ? 'docker' : 'native';
+            dns.root = saved.root || '';
+            dns.sub = saved.sub || '';
+            Object.keys(protocols).forEach(name => { protocols[name] = Boolean(saved.protocols?.[name]); });
+            lastDemo = saved.last || null;
         }
+    } catch (error) {
+        console.warn('Could not load workspace settings', error);
+    }
+    workspaceForms.real = Object.fromEntries(formGroups.map(group => [group, state[group]]));
+    Object.assign(state, workspaceForms.demo);
+}
+
+function demoStorageKey() {
+    return `bypass-demo:${document.getElementById('app').dataset.profile.toLowerCase()}`;
+}
+
+function switchMode(mode) {
+    if (state.deploy.running || deployMode === mode) return;
+    deployMode = mode;
+    Object.assign(state, workspaceForms[mode]);
+    initFormFromState();
+    clearFormError();
+    updateDeployControls();
+    if (mode === 'real' && state.vps.ip) refreshRealClients(state.vps.ip);
+}
+
+function fillDemo() {
+    Object.assign(state.vps, { ip: '203.0.113.10', user: 'demo', auth: 'password', password: 'mock', runtime: 'native' });
+    Object.assign(state.protocols, { hysteria2: true, vless_reality: false, openflux: false });
+    Object.assign(state.dns, { root: 'example.test', sub: 'vpn', cfToken: 'mock' });
+    Object.assign(state.certs, {
+        source: 'vps',
+        vpsFullchainPath: '/demo/fullchain.pem',
+        vpsPrivkeyPath: '/demo/privkey.pem'
+    });
+    initFormFromState();
+    clearFormError();
+    saveState();
+}
+
+function renderLastDemo() {
+    const result = document.getElementById('last-demo-result');
+    result.classList.toggle('hidden', deployMode !== 'demo' || !lastDemo);
+    if (lastDemo) {
+        const date = new Date(lastDemo.finishedAt).toLocaleString('ru-RU');
+        result.textContent = `Последнее демо · ${lastDemo.ip} · ${deployStatusText(lastDemo.status, 'demo')} · ${date}`;
     }
 }
 
@@ -53,6 +156,9 @@ async function api(path, { method = 'GET', body, form } = {}) {
     const r = await fetch(path, opts);
     if (!r.ok) {
         const error = await r.json();
+        if (error.error?.code === 'auth_required') {
+            window.location.assign('/login');
+        }
         throw new Error(error.error?.message || 'API request failed');
     }
     return r.status === 204 ? null : r.json();
@@ -85,9 +191,28 @@ function showToast(message, type = 'info') {
     }, 4000);
 }
 
+function clientToken(client) {
+    return client.sub_token || client.subToken;
+}
+
+function subscriptionUrl(client) {
+    const host = state.protocols.hysteria2 && state.dns.root && state.dns.sub
+        ? `${state.dns.sub}.${state.dns.root}`
+        : state.vps.ip;
+    const scheme = state.protocols.hysteria2 ? 'https' : 'http';
+    const port = state.protocols.hysteria2 ? 8444 : 8080;
+    return `${scheme}://${host}:${port}/sub/${clientToken(client)}`;
+}
+
+function decodeSubscription(payload) {
+    const binary = atob(payload.trim());
+    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+}
+
 // Section visibility based on protocols
 function updateSectionVisibility() {
-    const { hysteria2, openflux } = state.protocols;
+    const { hysteria2, vless_reality: vlessReality, openflux } = state.protocols;
     
     // DNS & CERTS section - only if Hysteria 2 is enabled
     if (hysteria2) {
@@ -101,6 +226,12 @@ function updateSectionVisibility() {
         showElement('section-openflux');
     } else {
         hideElement('section-openflux');
+    }
+
+    if (vlessReality) {
+        showElement('section-routing');
+    } else {
+        hideElement('section-routing');
     }
     
     // CLIENTS and SERVICES sections - only after successful deploy
@@ -130,20 +261,30 @@ function updateAuthFields() {
     }
 }
 
+function updateCertificateFields() {
+    if (state.certs.source === 'vps') {
+        hideElement('certificate-upload-fields');
+        showElement('certificate-vps-fields');
+    } else {
+        showElement('certificate-upload-fields');
+        hideElement('certificate-vps-fields');
+    }
+}
+
 // OpenFlux transport fields
 function updateOpenFluxFields() {
     const transport = state.openflux.transport;
-    const mode = state.openflux.mode || 'proxy';
-    hideElement('yandex-url-group');
+    const mode = state.openflux.mode || 'l4';
+    hideElement('document-url-group');
     hideElement('oneme-group');
     hideElement('openflux-localip-group');
     
-    if (mode === 'raw') {
+    if (mode === 'l3') {
         showElement('openflux-localip-group');
     }
 
-    if (transport === 'yandex') {
-        showElement('yandex-url-group');
+    if (['yandex', 'vyandex', 'mailru'].includes(transport)) {
+        showElement('document-url-group');
     } else if (transport === 'oneme') {
         showElement('oneme-group');
     }
@@ -174,11 +315,15 @@ function renderClients() {
         
         const protocols = document.createElement('span');
         protocols.className = 'client-protocols';
-        protocols.textContent = client.protocols;
+        protocols.textContent = [
+            state.protocols.vless_reality ? 'VLESS' : null,
+            state.protocols.hysteria2 ? 'Hy2' : null,
+        ].filter(Boolean).join('+');
         
         const sub = document.createElement('span');
         sub.className = 'client-sub';
-        sub.textContent = `/sub/${client.subToken.substring(0, 8)}…`;
+        const token = clientToken(client);
+        sub.textContent = `/sub/${token.substring(0, 8)}…`;
         
         info.appendChild(label);
         info.appendChild(protocols);
@@ -191,18 +336,10 @@ function renderClients() {
         copyBtn.className = 'icon-btn';
         copyBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i>';
         copyBtn.title = 'Copy subscription URL';
-        copyBtn.onclick = async (e) => {
+        copyBtn.onclick = (e) => {
             e.stopPropagation();
-            try {
-                const response = await fetch(`/api/sub/${client.subToken}`);
-                if (!response.ok) throw new Error('Failed to fetch subscription');
-                const subscription = await response.text();
-                copyToClipboard(subscription);
-                showToast('Copied.', 'success');
-            } catch (error) {
-                console.error('Failed to copy subscription:', error);
-                showToast('Failed to copy subscription', 'error');
-            }
+            copyToClipboard(subscriptionUrl(client));
+            showToast('Ссылка подписки скопирована.', 'success');
         };
         
         const renameBtn = document.createElement('button');
@@ -287,42 +424,112 @@ function renderServices() {
     }
 }
 
-// Deployment overlay
-function openDeployOverlay() {
-    showElement('deploy-overlay');
-    document.body.style.overflow = 'hidden';
+const deploymentStages = {
+    demo: [
+        ['converge', 'Описание'],
+        ['idempotence', 'Повторный прогон'],
+        ['verify', 'Проверка']
+    ],
+    real: [
+        ['prepare', 'Подготовка'],
+        ['ansible', 'Деплой и проверка']
+    ]
+};
+
+function focusJournal() {
+    document.getElementById('journal-title').focus({ preventScroll: true });
+    document.getElementById('deploy-journal').scrollIntoView({ block: 'nearest' });
 }
 
-function closeDeployOverlay() {
-    hideElement('deploy-overlay');
-    document.body.style.overflow = '';
+function renderStages() {
+    const stages = document.getElementById('stages-bar');
+    const mode = state.deploy.jobId || state.deploy.running ? state.deploy.mode : deployMode;
+    stages.replaceChildren(...deploymentStages[mode].map(([key, label]) => {
+        const status = state.deploy.stages[key];
+        const item = document.createElement('span');
+        item.className = `stage ${status || ''}`;
+        const icon = { running: '◐', done: '✓', failed: '✗' }[status] || '○';
+        const description = { running: 'выполняется', done: 'завершено', failed: 'ошибка' }[status] || 'ожидание';
+        item.textContent = `${icon} ${label}`;
+        item.setAttribute('aria-label', `${label}: ${description}`);
+        return item;
+    }));
 }
 
-// Update stages in overlay
-function updateStages() {
-    const stages = ['apt', 'runtime', 'xray', 'hysteria', 'sub', 'verify'];
-    stages.forEach(stage => {
-        const element = document.querySelector(`.stage[data-stage="${stage}"]`);
-        if (!element) return;
-        
-        const icon = element.querySelector('.stage-icon');
-        const status = state.deploy.stages[stage];
-        
-        element.classList.remove('running', 'done', 'failed');
-        
-        if (status === 'running') {
-            element.classList.add('running');
-            icon.textContent = '◐';
-        } else if (status === 'done') {
-            element.classList.add('done');
-            icon.textContent = '✓';
-        } else if (status === 'failed') {
-            element.classList.add('failed');
-            icon.textContent = '✗';
-        } else {
-            icon.textContent = '○';
+function trackDeploymentStage(line) {
+    if (state.deploy.mode === 'demo') {
+        const match = line.match(/\[default > (converge|idempotence|verify)\] (Executing|Executed: (?:Successful|Failed))/);
+        if (match) {
+            const status = { Executing: 'running', 'Executed: Successful': 'done', 'Executed: Failed': 'failed' };
+            state.deploy.stages[match[1]] = status[match[2]];
         }
+    } else if (line === 'deploy started') {
+        state.deploy.stages.prepare = 'running';
+    } else if (line === 'running ansible-playbook') {
+        state.deploy.stages.prepare = 'done';
+        state.deploy.stages.ansible = 'running';
+    }
+    renderStages();
+}
+
+function deployStatusText(status, mode) {
+    return {
+        idle: 'Ожидание запуска',
+        running: 'Выполняется',
+        success: mode === 'demo' ? 'Симуляция завершена' : 'Сервер настроен',
+        failed: 'Ошибка запуска',
+        cancelled: 'Запуск отменён'
+    }[status] || 'Статус неизвестен';
+}
+
+function setDeployStatus(status, error = '') {
+    const element = document.getElementById('deploy-status');
+    element.dataset.status = status;
+    element.textContent = deployStatusText(status, state.deploy.mode) + (error ? ` · ${error}` : '');
+}
+
+function updateDeployControls() {
+    const running = state.deploy.running;
+    const demo = deployMode === 'demo';
+    document.getElementById('app').dataset.mode = deployMode;
+    const button = document.getElementById('forge-btn');
+    document.getElementById('deploy-button-label').textContent = demo ? 'Запустить демо' : 'Развернуть на VPS';
+    button.disabled = running;
+    document.querySelectorAll('[data-deploy-mode]').forEach(control => {
+        control.disabled = running;
+        control.setAttribute('aria-pressed', String(control.dataset.deployMode === deployMode));
     });
+    document.getElementById('mode-description').textContent = demo
+        ? 'Molecule проверит конфигурацию на этом компьютере.'
+        : 'Ansible подключится по SSH и развернёт VPN на VPS.';
+    document.getElementById('demo-fill-btn').classList.toggle('hidden', !demo);
+    document.getElementById('demo-fill-btn').disabled = running;
+    const cancel = document.getElementById('cancel-deploy-btn');
+    cancel.classList.toggle('hidden', !demo);
+    cancel.disabled = !running || !state.deploy.jobId;
+    const hasLogs = state.deploy.logs.length > 0;
+    document.getElementById('copy-log-btn').disabled = !hasLogs;
+    document.getElementById('download-log-btn').disabled = !hasLogs;
+    const journalMode = state.deploy.jobId || running || hasLogs ? state.deploy.mode : deployMode;
+    document.getElementById('deploy-mode-badge').textContent = journalMode === 'demo' ? 'Демо' : 'На VPS';
+    updateStatusDot(running);
+    renderStages();
+    renderLastDemo();
+}
+
+function clearFormError() {
+    hideElement('deploy-form-error');
+    document.querySelectorAll('[aria-invalid="true"]').forEach(field => field.removeAttribute('aria-invalid'));
+}
+
+function showFormError(message, fieldId) {
+    const field = document.getElementById(fieldId);
+    const details = field.closest('details');
+    if (details) details.open = true;
+    field.setAttribute('aria-invalid', 'true');
+    document.getElementById('deploy-form-error').textContent = message;
+    showElement('deploy-form-error');
+    field.focus();
 }
 
 // Add log line to terminal
@@ -343,35 +550,57 @@ function clearTerminal() {
     document.getElementById('log-container').innerHTML = '';
 }
 
-// Real deployment process
+// Both modes use the same controls and event stream.
 async function startDeployment() {
+    if (state.deploy.running) return;
+    clearFormError();
+    const mode = deployMode;
+    const demo = mode === 'demo';
+    const ip = state.vps.ip.trim();
+    if (!ip) {
+        showFormError('Введите адрес сервера.', 'vps-ip');
+        return;
+    }
+    if (!Object.values(state.protocols).some(Boolean)) {
+        showFormError('Выберите хотя бы один протокол.', 'proto-hysteria2');
+        return;
+    }
+    const domain = state.dns.root.trim() && state.dns.sub.trim()
+        ? `${state.dns.sub.trim()}.${state.dns.root.trim()}` : null;
+    if (!demo && state.protocols.hysteria2 && !domain) {
+        showFormError('Для Hysteria 2 укажите корневой домен и поддомен.', state.dns.root.trim() ? 'dns-sub' : 'dns-root');
+        return;
+    }
+    if (!demo && state.protocols.hysteria2 && state.certs.source === 'vps' &&
+        (!state.certs.vpsFullchainPath || !state.certs.vpsPrivkeyPath)) {
+        showFormError('Укажите оба пути к сертификату на VPS.', state.certs.vpsFullchainPath ? 'cert-vps-privkey' : 'cert-vps-fullchain');
+        return;
+    }
+
     try {
-        // Validate at least one protocol
-        if (!state.protocols.hysteria2 && !state.protocols.vless_reality && !state.protocols.openflux) {
-            showToast('At least one protocol must be enabled', 'error');
-            return;
-        }
-        
-        // Validate VPS IP
-        if (!state.vps.ip) {
-            showToast('VPS IP is required', 'error');
-            return;
-        }
-        
         // Prepare deploy request
-        const deployRequest = {
-            ip: state.vps.ip,
+        const deployRequest = demo ? {
+            ip,
+            domain,
+            protocols: state.protocols,
+            runtime: state.vps.runtime
+        } : {
+            ip,
             ssh_user: state.vps.user,
             ssh_port: state.vps.port,
             ssh_private_key_path: state.vps.auth === 'key' ? state.vps.keyPath : null,
             ssh_password: state.vps.auth === 'password' ? state.vps.password : null,
-            domain: state.protocols.hysteria2 ? (state.dns.sub && state.dns.root ? `${state.dns.sub}.${state.dns.root}` : null) : null,
+            domain: state.protocols.hysteria2 ? domain : null,
             root_domain: state.dns.root || null,
             protocols: state.protocols,
             runtime: state.vps.runtime,
+            certificate_source: state.certs.source,
+            vps_fullchain_path: state.certs.source === 'vps' ? state.certs.vpsFullchainPath : null,
+            vps_privkey_path: state.certs.source === 'vps' ? state.certs.vpsPrivkeyPath : null,
             openflux: state.protocols.openflux ? {
                 transport: state.openflux.transport,
-                mode: state.openflux.mode || 'proxy',
+                mode: state.openflux.mode || 'l4',
+                codec: state.openflux.codec || 'batched',
                 local_ip: state.openflux.localIp || null,
                 yandex_url: state.openflux.yandexUrl || null,
                 max_token: state.openflux.maxToken || null,
@@ -379,6 +608,14 @@ async function startDeployment() {
                 encryption_key: state.openflux.encKey || null,
                 debug: false,
             } : null,
+            routing: {
+                ru_direct: state.routing.ruDirect,
+                private_direct: state.routing.privateDirect,
+                custom_direct_domains: state.routing.customDirectDomains
+                    .split(/[\n,]+/)
+                    .map(domain => domain.trim())
+                    .filter(Boolean),
+            },
             cf_api_token: state.dns.cfToken || null
         };
         
@@ -387,7 +624,7 @@ async function startDeployment() {
         formData.append('payload', JSON.stringify(deployRequest));
         
         // Add certificate files if Hysteria 2 is enabled
-        if (state.protocols.hysteria2) {
+        if (!demo && state.protocols.hysteria2 && state.certs.source === 'upload') {
             const certInput = document.getElementById('cert-file');
             const keyInput = document.getElementById('key-file');
             
@@ -399,112 +636,92 @@ async function startDeployment() {
             }
         }
         
-        state.deploy.running = true;
-        state.deploy.logs = [];
+        state.deploy = { jobId: null, running: true, stages: {}, logs: [], mode, ip };
         clearTerminal();
-        openDeployOverlay();
-        updateStatusDot(true);
-        
-        // Start deployment
-        const response = await api('/api/deploy', { method: 'POST', form: formData });
+        setDeployStatus('running');
+        updateDeployControls();
+        focusJournal();
+
+        const path = demo ? '/api/deploy/demo' : '/api/deploy';
+        const response = await api(path, { method: 'POST', form: formData });
         state.deploy.jobId = response.job_id;
-        
-        // Connect to SSE stream
+        updateDeployControls();
         connectToStream(response.job_id);
-        
     } catch (error) {
-        console.error('Deployment failed:', error);
-        showToast(error.message, 'error');
-        state.deploy.running = false;
-        updateStatusDot(false);
+        completeDeployment('failed', error.message);
     }
 }
 
-// SSE stream connection
 function connectToStream(jobId) {
     const eventSource = new EventSource(`/api/deploy/stream/${jobId}`);
-    
-    eventSource.addEventListener('log', (e) => {
-        const data = JSON.parse(e.data);
-        addLogLine(data.line);
-        state.deploy.logs.push(data.line);
+
+    eventSource.addEventListener('log', event => {
+        const line = JSON.parse(event.data).line;
+        state.deploy.logs.push(line);
+        addLogLine(line);
+        trackDeploymentStage(line);
+        document.getElementById('copy-log-btn').disabled = false;
+        document.getElementById('download-log-btn').disabled = false;
     });
-    
-    eventSource.addEventListener('stage', (e) => {
-        const data = JSON.parse(e.data);
-        if (data.stage) {
-            state.deploy.stages[data.stage] = data.status;
-            updateStages();
-        }
-    });
-    
-    eventSource.addEventListener('done', (e) => {
-        const data = JSON.parse(e.data);
+
+    eventSource.addEventListener('done', event => {
+        const { status, error } = JSON.parse(event.data);
         eventSource.close();
-        completeDeployment(data.status === 'success');
+        completeDeployment(status, status === 'cancelled' ? '' : error);
     });
-    
-    eventSource.addEventListener('error', (e) => {
+
+    eventSource.addEventListener('error', () => {
         eventSource.close();
-        completeDeployment(false);
+        completeDeployment('failed', 'Связь с журналом прервалась.');
     });
-    
-    // Store for cleanup
-    state.deploy.eventSource = eventSource;
 }
 
-async function completeDeployment(success) {
+function completeDeployment(status, error = '') {
+    const { mode, ip, stages } = state.deploy;
     state.deploy.running = false;
-    updateStatusDot(false);
-    
-    if (success) {
-        addLogLine('✓ Node forged.', 'success');
-        document.getElementById('app').classList.add('flash-success');
-        setTimeout(() => {
-            document.getElementById('app').classList.remove('flash-success');
-        }, 1000);
-        
-        // Load real clients from backend
-        try {
-            state.clients = await api(`/api/clients?ip=${state.vps.ip}`);
+    if (mode === 'real' && status === 'success') {
+        stages.ansible = 'done';
+        refreshRealClients(ip);
+    }
+    if (status === 'failed' || status === 'cancelled') {
+        Object.keys(stages).forEach(stage => {
+            if (stages[stage] === 'running') stages[stage] = 'failed';
+        });
+    }
+    if (mode === 'demo') {
+        lastDemo = { ip, status, finishedAt: new Date().toISOString() };
+        saveState();
+    }
+    const message = deployStatusText(status, mode);
+    const summary = error ? `${message} · ${error}` : message;
+    state.deploy.logs.push(summary);
+    addLogLine(summary, { success: 'success', failed: 'error', cancelled: 'warning' }[status]);
+    setDeployStatus(status, error);
+    updateDeployControls();
+}
+
+async function refreshRealClients(ip) {
+    try {
+        const clients = await api(`/api/clients?ip=${encodeURIComponent(ip)}`);
+        if (deployMode === 'real' && state.vps.ip.trim() === ip) {
+            state.clients = clients;
             renderClients();
             updateSectionVisibility();
-            saveState();
-        } catch (error) {
-            console.error('Failed to load clients:', error);
         }
-        
-        showToast('Node forged successfully!', 'success');
-    } else {
-        addLogLine('✗ Deploy failed.', 'error');
-        document.getElementById('app').classList.add('flash-error');
-        setTimeout(() => {
-            document.getElementById('app').classList.remove('flash-error');
-        }, 1000);
-        
-        showToast('Deploy failed.', 'error');
+    } catch (error) {
+        showToast(error.message, 'error');
     }
 }
 
 async function cancelDeployment() {
     if (!state.deploy.running || !state.deploy.jobId) return;
-    
+    const button = document.getElementById('cancel-deploy-btn');
+    button.disabled = true;
     try {
         await api(`/api/deploy/cancel/${state.deploy.jobId}`, { method: 'POST' });
-        if (state.deploy.eventSource) {
-            state.deploy.eventSource.close();
-        }
-        state.deploy.running = false;
-        addLogLine('▸ Deployment cancelled.', 'warning');
-        updateStatusDot(false);
-        
-        // Reset stages
-        Object.keys(state.deploy.stages).forEach(stage => {
-            state.deploy.stages[stage] = 'failed';
-        });
-        updateStages();
     } catch (error) {
-        console.error('Failed to cancel deployment:', error);
+        button.disabled = !state.deploy.running;
+        showToast(error.message, 'error');
     }
 }
 
@@ -560,12 +777,17 @@ async function openViewConfigModal(clientId) {
     if (client) {
         const container = document.getElementById('config-urls');
         container.innerHTML = '';
+        const token = clientToken(client);
+        document.getElementById('subscription-url').textContent = subscriptionUrl(client);
+        document.getElementById('routing-summary').textContent = state.routing.ruDirect
+            ? 'Xray JSON включает: private → direct, category-ru/geoip:ru → direct, остальное → VPN.'
+            : 'Xray JSON включает локальную сеть и пользовательские direct-домены.';
         
         try {
             // Get subscription URLs from backend
-            const response = await fetch(`/api/sub/${client.subToken}`);
+            const response = await fetch(`/api/sub/${token}`);
             if (!response.ok) throw new Error('Failed to fetch subscription');
-            const subscription = await response.text();
+            const subscription = decodeSubscription(await response.text());
             const urls = subscription.split('\n').filter(url => url.trim());
             
             urls.forEach(url => {
@@ -603,7 +825,7 @@ async function addClient() {
         updateSectionVisibility();
         saveState();
         closeModal('add-client-modal');
-        showToast('Client added.', 'success');
+        showToast('Клиент добавлен локально. Нажмите DEPLOY, чтобы отправить его на VPS.', 'success');
     } catch (error) {
         console.error('Failed to add client:', error);
         showToast(error.message, 'error');
@@ -630,7 +852,7 @@ async function renameClient() {
             saveState();
         }
         closeModal('rename-client-modal');
-        showToast('Client renamed.', 'success');
+        showToast('Клиент переименован. Нажмите DEPLOY, чтобы обновить VPS.', 'success');
     } catch (error) {
         console.error('Failed to rename client:', error);
         showToast(error.message, 'error');
@@ -648,7 +870,7 @@ async function deleteClient() {
         updateSectionVisibility();
         saveState();
         closeModal('delete-client-modal');
-        showToast('Client deleted.', 'success');
+        showToast('Клиент удалён локально. Нажмите DEPLOY, чтобы обновить VPS.', 'success');
     } catch (error) {
         console.error('Failed to delete client:', error);
         showToast(error.message, 'error');
@@ -707,6 +929,7 @@ function setupFormInputs() {
                 if (parts.length === 2) {
                     state[parts[0]][parts[1]] = e.target.value;
                 }
+                if (e.target.hasAttribute('aria-invalid')) clearFormError();
                 saveState();
             }
         });
@@ -721,9 +944,18 @@ function setupFormInputs() {
                 if (parts.length === 2) {
                     state[parts[0]][parts[1]] = e.target.checked;
                 }
+                if (e.target.hasAttribute('aria-invalid')) clearFormError();
                 updateSectionVisibility();
                 saveState();
             }
+        });
+    });
+
+    document.querySelectorAll('#routing-ru-direct, #routing-private-direct').forEach(checkbox => {
+        checkbox.addEventListener('change', (e) => {
+            const parts = e.target.dataset.field.split('.');
+            state[parts[0]][parts[1]] = e.target.checked;
+            saveState();
         });
     });
     
@@ -744,6 +976,12 @@ function setupFormInputs() {
                 if (field === 'openflux.transport') {
                     updateOpenFluxFields();
                 }
+                if (field === 'openflux.mode') {
+                    updateOpenFluxFields();
+                }
+                if (field === 'certs.source') {
+                    updateCertificateFields();
+                }
                 
                 saveState();
             }
@@ -753,22 +991,32 @@ function setupFormInputs() {
 
 // Event listeners
 function setupEventListeners() {
-    // Forge button
+    // Deploy button
     document.getElementById('forge-btn').addEventListener('click', () => {
         startDeployment();
     });
     
-    // Status button
-    document.getElementById('status-btn').addEventListener('click', () => {
-        if (state.deploy.running || state.deploy.logs.length > 0) {
-            openDeployOverlay();
-        } else {
-            showToast('No deployment in progress', 'info');
+    document.getElementById('status-btn').addEventListener('click', focusJournal);
+    document.querySelectorAll('[data-deploy-mode]').forEach(button => {
+        button.addEventListener('click', () => switchMode(button.dataset.deployMode));
+    });
+    document.getElementById('demo-fill-btn').addEventListener('click', fillDemo);
+    document.getElementById('help-btn').addEventListener('click', () => openModal('help-modal'));
+    document.getElementById('openflux-client-btn').addEventListener('click', async () => {
+        if (!state.vps.ip) {
+            showToast('Сначала укажите VPS и нажмите DEPLOY.', 'error');
+            return;
+        }
+        try {
+            const setup = await api(`/api/openflux/client?ip=${encodeURIComponent(state.vps.ip)}`);
+            document.getElementById('openflux-client-command').textContent = setup.command;
+            document.getElementById('openflux-client-key').textContent = setup.encryption_key || 'шифрование выключено';
+            showElement('openflux-client-output');
+        } catch (error) {
+            showToast(error.message, 'error');
         }
     });
     
-    // Overlay controls
-    document.getElementById('close-overlay-btn').addEventListener('click', closeDeployOverlay);
     document.getElementById('cancel-deploy-btn').addEventListener('click', cancelDeployment);
     
     document.getElementById('copy-log-btn').addEventListener('click', () => {
@@ -804,20 +1052,24 @@ function setupEventListeners() {
     });
     
     // Copy config button
-    document.getElementById('copy-config-btn').addEventListener('click', async () => {
-        try {
-            const client = state.clients.find(c => c.id === state.selectedClientId);
-            if (client) {
-                const response = await fetch(`/api/sub/${client.subToken}`);
-                if (!response.ok) throw new Error('Failed to fetch subscription');
-                const subscription = await response.text();
-                copyToClipboard(subscription);
-                showToast('Config copied to clipboard', 'success');
-            }
-        } catch (error) {
-            console.error('Failed to copy config:', error);
-            showToast('Failed to copy config', 'error');
+    document.getElementById('copy-config-btn').addEventListener('click', () => {
+        const client = state.clients.find(c => c.id === state.selectedClientId);
+        if (!client) return;
+        copyToClipboard(subscriptionUrl(client));
+        showToast('Ссылка подписки скопирована.', 'success');
+    });
+
+    document.getElementById('download-xray-btn').addEventListener('click', () => {
+        const client = state.clients.find(c => c.id === state.selectedClientId);
+        if (!client) return;
+        if (!state.protocols.vless_reality) {
+            showToast('Xray JSON доступен только при включённом VLESS Reality.', 'error');
+            return;
         }
+        const link = document.createElement('a');
+        link.href = `/api/config/${clientToken(client)}/xray.json`;
+        link.download = `bypass-${client.label}-xray.json`;
+        link.click();
     });
     
     // Validate cert button
@@ -860,14 +1112,9 @@ function setupEventListeners() {
     // Keyboard navigation
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            closeDeployOverlay();
             document.querySelectorAll('.modal:not(.hidden)').forEach(modal => {
                 closeModal(modal.id);
             });
-        }
-        
-        if (e.key === 'Enter' && !e.target.matches('input, textarea')) {
-            document.getElementById('forge-btn').click();
         }
     });
 }
@@ -896,27 +1143,36 @@ function initFormFromState() {
     document.getElementById('dns-cftoken').value = state.dns.cfToken;
     document.getElementById('dns-root').value = state.dns.root;
     document.getElementById('dns-sub').value = state.dns.sub;
+    document.querySelector(`input[name="certificate-source"][value="${state.certs.source}"]`).checked = true;
+    document.getElementById('cert-vps-fullchain').value = state.certs.vpsFullchainPath;
+    document.getElementById('cert-vps-privkey').value = state.certs.vpsPrivkeyPath;
     
     // OpenFlux
-    if (state.openflux.transport) {
-        document.querySelector(`input[name="transport"][value="${state.openflux.transport}"]`).checked = true;
-        document.getElementById('openflux-yandex').value = state.openflux.yandexUrl;
-        document.getElementById('openflux-maxtoken').value = state.openflux.maxToken;
-        document.getElementById('openflux-maxuid').value = state.openflux.maxUid;
-        document.getElementById('openflux-enckey').value = state.openflux.encKey;
-    }
+    document.querySelectorAll('input[name="transport"]').forEach(input => {
+        input.checked = input.value === state.openflux.transport;
+    });
+    document.getElementById('openflux-enckey').value = state.openflux.encKey || '';
+    document.getElementById('openflux-yandex').value = state.openflux.yandexUrl || '';
+    document.getElementById('openflux-maxtoken').value = state.openflux.maxToken || '';
+    document.getElementById('openflux-maxuid').value = state.openflux.maxUid || '';
     if (state.openflux.mode) {
         document.querySelector(`input[name="openflux-mode"][value="${state.openflux.mode}"]`).checked = true;
     }
     document.getElementById('openflux-localip').value = state.openflux.localIp || '';
+    document.querySelector(`input[name="openflux-codec"][value="${state.openflux.codec || 'batched'}"]`).checked = true;
+
+    document.getElementById('routing-ru-direct').checked = state.routing.ruDirect;
+    document.getElementById('routing-private-direct').checked = state.routing.privateDirect;
+    document.getElementById('routing-custom-domains').value = state.routing.customDirectDomains;
     
     updateAuthFields();
+    updateCertificateFields();
     updateOpenFluxFields();
     updateSectionVisibility();
 }
 
 // Initialize app
-async function init() {
+function init() {
     loadState();
     initIcons();
     initFormFromState();
@@ -924,16 +1180,8 @@ async function init() {
     setupPasswordToggles();
     setupEventListeners();
     
-    // Load clients from backend if VPS IP is set
-    if (state.vps.ip) {
-        try {
-            state.clients = await api(`/api/clients?ip=${state.vps.ip}`);
-        } catch (error) {
-            console.error('Failed to load clients:', error);
-            // Keep existing clients from localStorage if API fails
-        }
-    }
-    
+    updateDeployControls();
+
     renderClients();
     renderServices();
     
@@ -943,7 +1191,7 @@ async function init() {
     if (clientCount) clientCount.textContent = state.clients.length;
     if (nodeCount) nodeCount.textContent = state.vps.ip ? '1' : '0';
     
-    console.log('VPN-Forge UI initialized (backend integration mode)');
+    console.log('bypass UI initialized (backend integration mode)');
 }
 
 // Start app when DOM is ready

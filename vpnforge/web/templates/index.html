@@ -1,440 +1,470 @@
+{% from "icons.html" import icon -%}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VPN-Forge v0.1.0</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@0.469.0"></script>
-    <link rel="stylesheet" href="/static/style.css">
-    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <title>bypass v0.1.0</title>
+    <link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <link rel="stylesheet" href="/static/workspace.css?v=7">
+    <link rel="icon" href="/static/favicon.svg?v=3" type="image/svg+xml">
 </head>
-<body class="bg-base text-text font-mono antialiased">
-    <div id="app" class="min-h-screen flex flex-col">
-        <!-- Header -->
-        <header class="border-b border-subtle bg-panel px-6 py-4 relative overflow-hidden">
-            <!-- Animated grid background -->
-            <div class="absolute inset-0" style="opacity: 0.03;">
-                <div class="absolute inset-0" style="background-image: linear-gradient(rgba(59,130,246,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(59,130,246,0.1) 1px, transparent 1px); background-size: 20px 20px;"></div>
-            </div>
-            
-            <div class="relative flex items-center justify-between">
-                <!-- Logo section -->
-                <div class="flex items-center gap-4">
-                    <div class="relative">
-                        <div class="w-12 h-12 rounded-lg flex items-center justify-center glow-pulse" style="background: linear-gradient(135deg, var(--accent), var(--accent-bright));">
-                            <i data-lucide="shield" class="w-7 h-7 text-white"></i>
-                        </div>
-                        <div class="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-panel status-dot-pulse" style="background-color: var(--success);"></div>
+<body class="bg-base text-text antialiased">
+    <div id="app" class="min-h-screen flex flex-col" data-profile="{{ profile }}" data-mode="demo">
+        <header class="workspace-masthead">
+            <div class="workspace-nav">
+                <span class="bypass-wordmark"><img src="/static/favicon.svg?v=3" width="32" height="32" alt="">bypass</span>
+                <div class="workspace-nav-tools">
+                    <div class="workspace-counts real-only">
+                        <span>Узлы <b id="node-count">0</b></span>
+                        <span>Клиенты <b id="client-count">0</b></span>
                     </div>
-                    <div>
-                        <div class="flex items-center gap-2">
-                            <h1 class="font-bold text-xl tracking-wide">VPN-FORGE</h1>
-                            <span class="text-xs px-2 py-0.5 rounded font-mono" style="background-color: rgba(59, 130, 246, 0.2); color: var(--accent);">v0.1.0</span>
-                        </div>
-                        <div class="flex items-center gap-2 text-xs" style="color: var(--text-dim);">
-                            <span class="flex items-center gap-1">
-                                <i data-lucide="cpu" class="w-3 h-3"></i>
-                                <span>SYSTEM READY</span>
-                            </span>
-                            <span style="color: var(--accent);">•</span>
-                            <span class="flex items-center gap-1">
-                                <i data-lucide="globe" class="w-3 h-3"></i>
-                                <span>LOCAL MODE</span>
-                            </span>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Right section -->
-                <div class="flex items-center gap-3">
-                    <!-- Quick stats -->
-                    <div class="hidden md:flex items-center gap-4 px-4 py-2 rounded border" style="background-color: var(--bg-elevated); border-color: var(--border-subtle);">
-                        <div class="flex items-center gap-2">
-                            <i data-lucide="server" class="w-4 h-4" style="color: var(--text-muted);"></i>
-                            <span class="text-xs" style="color: var(--text-muted);">NODES</span>
-                            <span class="text-xs font-bold" style="color: var(--accent);" id="node-count">0</span>
-                        </div>
-                        <div class="w-px h-4" style="background-color: var(--border-subtle);"></div>
-                        <div class="flex items-center gap-2">
-                            <i data-lucide="users" class="w-4 h-4" style="color: var(--text-muted);"></i>
-                            <span class="text-xs" style="color: var(--text-muted);">CLIENTS</span>
-                            <span class="text-xs font-bold" style="color: var(--accent);" id="client-count">0</span>
-                        </div>
-                    </div>
-                    
-                    <!-- Status button -->
-                    <button id="status-btn" class="flex items-center gap-2 px-3 py-2 rounded border transition-all hover:border-glow" style="background-color: var(--bg-elevated); border-color: var(--border-subtle);">
-                        <span id="status-dot" class="status-dot-pulse" style="color: var(--text-dim);">●</span>
-                        <span class="text-sm hover:text-accent transition-colors" style="color: var(--text-muted);">status</span>
+                    <button type="button" id="status-btn" class="btn btn-sm btn-outline-light">
+                        <span id="status-dot" aria-hidden="true">●</span> Журнал
                     </button>
-                    
-                    <!-- Help button -->
-                    <button class="p-2 rounded transition-colors hover:bg-elevated hover:text-accent" style="color: var(--text-muted);">
-                        <i data-lucide="help-circle" class="w-5 h-5"></i>
-                    </button>
+                    <button type="button" id="help-btn" class="btn btn-sm btn-outline-light" aria-label="Помощь" title="Помощь">{{ icon('help-circle') }}</button>
+                    <form action="/logout" method="post" class="workspace-profile">
+                        <span class="profile-name">{{ profile }}</span>
+                        <button class="btn btn-sm btn-outline-light" type="submit">{{ icon('logout-2') }} Выйти</button>
+                    </form>
                 </div>
             </div>
         </header>
 
-        <!-- Main Content -->
-        <main class="flex-1 max-w-5xl mx-auto w-full p-6 space-y-6">
-            <!-- PROTOCOLS Section -->
-            <section id="section-protocols" class="panel fade-in">
-                <div class="panel-header">
-                    <span class="text-accent">▸</span>
-                    <span>PROTOCOLS</span>
-                </div>
-                <div class="panel-content space-y-3">
-                    <label class="radio-group">
-                        <input type="checkbox" id="proto-hysteria2" data-field="protocols.hysteria2">
-                        <span class="radio-indicator"></span>
-                        <span class="radio-label">Hysteria 2</span>
-                        <span class="radio-desc">UDP/443, real TLS</span>
-                    </label>
-                    <label class="radio-group">
-                        <input type="checkbox" id="proto-vless" data-field="protocols.vless_reality">
-                        <span class="radio-indicator"></span>
-                        <span class="radio-label">VLESS Reality</span>
-                        <span class="radio-desc">TCP/443, xHTTP packet-up</span>
-                    </label>
-                    <label class="radio-group">
-                        <input type="checkbox" id="proto-openflux" data-field="protocols.openflux">
-                        <span class="radio-indicator"></span>
-                        <span class="radio-label">OpenFlux</span>
-                        <span class="radio-desc">separate client, tunnel</span>
-                    </label>
-                </div>
-            </section>
-
-            <!-- VPS Section -->
-            <section id="section-vps" class="panel fade-in">
-                <div class="panel-header">
-                    <span class="text-accent">▸</span>
-                    <span>VPS</span>
-                </div>
-                <div class="panel-content space-y-4">
-                    <div class="input-group">
-                        <label class="input-label">IP</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="text" id="vps-ip" data-field="vps.ip" placeholder="1.2.3.4" class="input-field">
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Port</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="number" id="vps-port" data-field="vps.port" value="22" class="input-field">
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">User</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="text" id="vps-user" data-field="vps.user" value="root" class="input-field">
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Auth</label>
-                        <div class="radio-group-inline">
-                            <label class="radio-group">
-                                <input type="radio" name="auth" value="key" data-field="vps.auth" checked>
-                                <span class="radio-indicator"></span>
-                                <span class="radio-label">SSH key</span>
-                            </label>
-                            <label class="radio-group">
-                                <input type="radio" name="auth" value="password" data-field="vps.auth">
-                                <span class="radio-indicator"></span>
-                                <span class="radio-label">Password</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="input-group" id="key-path-group">
-                        <label class="input-label">Key path</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="text" id="vps-keypath" data-field="vps.keyPath" placeholder="~/.ssh/id_ed25519" class="input-field">
-                        </div>
-                    </div>
-                    <div class="input-group hidden" id="password-group">
-                        <label class="input-label">Password</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="password" id="vps-password" data-field="vps.password" placeholder="••••••••" class="input-field">
-                            <button type="button" class="password-toggle" data-target="vps-password">
-                                <i data-lucide="eye" class="w-4 h-4"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Runtime</label>
-                        <div class="radio-group-inline">
-                            <label class="radio-group">
-                                <input type="radio" name="runtime" value="native" data-field="vps.runtime" checked>
-                                <span class="radio-indicator"></span>
-                                <span class="radio-label">native</span>
-                            </label>
-                            <label class="radio-group">
-                                <input type="radio" name="runtime" value="docker" data-field="vps.runtime">
-                                <span class="radio-indicator"></span>
-                                <span class="radio-label">docker</span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- DNS & CERTS Section -->
-            <section id="section-dns" class="panel fade-in hidden">
-                <div class="panel-header">
-                    <span class="text-accent">▸</span>
-                    <span>DNS & CERTS</span>
-                </div>
-                <div class="panel-content space-y-4">
-                    <div class="input-group">
-                        <label class="input-label">CF Token</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="password" id="dns-cftoken" data-field="dns.cfToken" placeholder="••••••••••••••••" class="input-field">
-                            <button type="button" class="password-toggle" data-target="dns-cftoken">
-                                <i data-lucide="eye" class="w-4 h-4"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Root</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="text" id="dns-root" data-field="dns.root" placeholder="example.com" class="input-field">
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Sub</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="text" id="dns-sub" data-field="dns.sub" placeholder="node1" class="input-field">
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Cert</label>
-                        <div class="file-input-wrapper">
-                            <button type="button" class="file-select-btn" data-target="cert-file">
-                                [ select fullchain.pem ]
-                            </button>
-                            <input type="file" id="cert-file" accept=".pem,.crt" class="hidden">
-                            <span id="cert-status" class="file-status"></span>
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Key</label>
-                        <div class="file-input-wrapper">
-                            <button type="button" class="file-select-btn" data-target="key-file">
-                                [ select privkey.pem ]
-                            </button>
-                            <input type="file" id="key-file" accept=".pem,.key" class="hidden">
-                            <span id="key-status" class="file-status"></span>
-                        </div>
-                        <button type="button" id="validate-cert-btn" class="validate-btn mt-2">
-                            [ ✓ validate ]
-                        </button>
-                    </div>
-                </div>
-            </section>
-
-            <!-- OPENFLUX Section -->
-            <section id="section-openflux" class="panel fade-in hidden">
-                <div class="panel-header">
-                    <span class="text-accent">▸</span>
-                    <span>OPENFLUX</span>
-                </div>
-                <div class="panel-content space-y-4">
-                    <div class="input-group">
-                        <label class="input-label">Transport</label>
-                        <div class="radio-group-inline">
-                            <label class="radio-group">
-                                <input type="radio" name="transport" value="cupsonline" data-field="openflux.transport">
-                                <span class="radio-indicator"></span>
-                                <span class="radio-label">cupsonline</span>
-                            </label>
-                            <label class="radio-group">
-                                <input type="radio" name="transport" value="yandex" data-field="openflux.transport">
-                                <span class="radio-indicator"></span>
-                                <span class="radio-label">yandex</span>
-                            </label>
-                            <label class="radio-group">
-                                <input type="radio" name="transport" value="oneme" data-field="openflux.transport">
-                                <span class="radio-indicator"></span>
-                                <span class="radio-label">oneme</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Mode</label>
-                        <div class="radio-group-inline">
-                            <label class="radio-group">
-                                <input type="radio" name="openflux-mode" value="proxy" data-field="openflux.mode" checked>
-                                <span class="radio-indicator"></span>
-                                <span class="radio-label">proxy</span>
-                            </label>
-                            <label class="radio-group">
-                                <input type="radio" name="openflux-mode" value="raw" data-field="openflux.mode">
-                                <span class="radio-indicator"></span>
-                                <span class="radio-label">raw</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="input-group hidden" id="openflux-localip-group">
-                        <label class="input-label">Local IP</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="text" id="openflux-localip" data-field="openflux.localIp" placeholder="203.0.113.10" class="input-field">
-                        </div>
-                    </div>
-                    <div class="input-group hidden" id="yandex-url-group">
-                        <label class="input-label">Yandex URL</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="text" id="openflux-yandex" data-field="openflux.yandexUrl" placeholder="https://..." class="input-field">
-                        </div>
-                    </div>
-                    <div class="input-group hidden" id="oneme-group">
-                        <div class="input-group">
-                            <label class="input-label">Max Token</label>
-                            <div class="input-wrapper">
-                                <span class="input-prefix">></span>
-                                <input type="text" id="openflux-maxtoken" data-field="openflux.maxToken" placeholder="" class="input-field">
-                            </div>
-                        </div>
-                        <div class="input-group">
-                            <label class="input-label">Max UID</label>
-                            <div class="input-wrapper">
-                                <span class="input-prefix">></span>
-                                <input type="text" id="openflux-maxuid" data-field="openflux.maxUid" placeholder="" class="input-field">
-                            </div>
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label class="input-label">Encryption key</label>
-                        <div class="input-wrapper">
-                            <span class="input-prefix">></span>
-                            <input type="password" id="openflux-enckey" data-field="openflux.encKey" placeholder="optional AES-256 key" class="input-field">
-                            <button type="button" class="password-toggle" data-target="openflux-enckey">
-                                <i data-lucide="eye" class="w-4 h-4"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- CLIENTS Section -->
-            <section id="section-clients" class="panel fade-in hidden">
-                <div class="panel-header">
-                    <span class="text-accent">▸</span>
-                    <span>CLIENTS</span>
-                </div>
-                <div class="panel-content">
-                    <div id="clients-list" class="space-y-2">
-                        <!-- Clients will be rendered here -->
-                    </div>
-                    <button type="button" id="add-client-btn" class="secondary-btn mt-4">
-                        [ + add client ]
-                    </button>
-                </div>
-            </section>
-
-            <!-- SERVICES Section -->
-            <section id="section-services" class="panel fade-in hidden">
-                <div class="panel-header">
-                    <span class="text-accent">▸</span>
-                    <span>SERVICES</span>
-                </div>
-                <div class="panel-content">
-                    <div id="services-list" class="space-y-2">
-                        <!-- Services will be rendered here -->
-                    </div>
-                </div>
-            </section>
-        </main>
-
-        <!-- Bottom Panel -->
-        <footer class="border-t border-subtle bg-panel px-6 py-4 flex items-center justify-between">
-            <div class="flex items-center gap-2 text-muted">
-                <span>forge</span>
-                <span class="text-accent">></span>
-                <span class="animate-pulse">_</span>
-            </div>
-            <button type="button" id="forge-btn" class="forge-btn">
-                [▸ FORGE]
-            </button>
-        </footer>
-    </div>
-
-    <!-- Deployment Overlay -->
-    <div id="deploy-overlay" class="overlay hidden">
-        <div class="overlay-content">
-            <div class="overlay-header">
-                <div class="flex items-center gap-2">
-                    <span class="text-accent">▸</span>
-                    <span>DEPLOYMENT</span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button type="button" id="copy-log-btn" class="icon-btn" title="Copy log">
-                        <i data-lucide="copy" class="w-4 h-4"></i>
-                    </button>
-                    <button type="button" id="download-log-btn" class="icon-btn" title="Download log">
-                        <i data-lucide="download" class="w-4 h-4"></i>
-                    </button>
-                    <button type="button" id="close-overlay-btn" class="icon-btn" title="Close">
-                        <i data-lucide="x" class="w-4 h-4"></i>
-                    </button>
-                </div>
-            </div>
-            
-            <!-- Progress Stages -->
-            <div id="stages-bar" class="stages-bar">
-                <div class="stage" data-stage="apt">
-                    <span class="stage-icon">○</span>
-                    <span class="stage-name">apt</span>
-                </div>
-                <div class="stage" data-stage="runtime">
-                    <span class="stage-icon">○</span>
-                    <span class="stage-name">runtime</span>
-                </div>
-                <div class="stage" data-stage="xray">
-                    <span class="stage-icon">○</span>
-                    <span class="stage-name">xray</span>
-                </div>
-                <div class="stage" data-stage="hysteria">
-                    <span class="stage-icon">○</span>
-                    <span class="stage-name">hysteria</span>
-                </div>
-                <div class="stage" data-stage="sub">
-                    <span class="stage-icon">○</span>
-                    <span class="stage-name">sub</span>
-                </div>
-                <div class="stage" data-stage="verify">
-                    <span class="stage-icon">○</span>
-                    <span class="stage-name">verify</span>
+        <main class="workspace">
+            <div class="workspace-heading">
+                <h1>Деплой VPN<span aria-hidden="true">.</span></h1>
+                <div class="deploy-route" aria-hidden="true">
+                    <span class="route-origin"><img src="/static/favicon.svg?v=3" width="25" height="25" alt="">bypass</span>
+                    <span class="route-wire">
+                        <svg viewBox="0 0 112 20" fill="none">
+                            <path d="M1 10h27l7-7h25l14 14h18l7-7h12" stroke="currentColor"/>
+                        </svg>
+                    </span>
+                    <span class="route-destination"><span class="route-demo">{{ icon('device-laptop') }} localhost</span><span class="route-real">{{ icon('server-2') }} VPS / SSH</span></span>
                 </div>
             </div>
 
-            <!-- Terminal -->
-            <div id="terminal" class="terminal">
-                <div id="log-container" class="log-container">
-                    <!-- Log lines will be rendered here -->
+            <div class="launch-rail">
+                <div class="workspace-mode" role="group" aria-label="Режим запуска">
+                    <button type="button" data-deploy-mode="demo" aria-pressed="true">{{ icon('flask') }} Демо</button>
+                    <button type="button" data-deploy-mode="real" aria-pressed="false">{{ icon('server-2') }} На VPS</button>
                 </div>
-            </div>
-
-            <div class="overlay-footer">
-                <button type="button" id="cancel-deploy-btn" class="secondary-btn">
-                    [ ▸ cancel ]
+                <p id="mode-description">Molecule проверит конфигурацию на этом компьютере.</p>
+                <button type="button" id="forge-btn" class="btn btn-primary">
+                    <span id="deploy-button-label">Запустить демо</span>{{ icon('arrow-up-right') }}
                 </button>
             </div>
-        </div>
+
+            <div class="workspace-grid">
+                <div class="workspace-settings">
+                    <p id="deploy-form-error" class="alert alert-danger hidden" role="alert"></p>
+                    <!-- VPS Section -->
+                    <section id="section-vps" class="panel fade-in">
+                        <div class="panel-header">
+                            <h2>{{ icon('server-2') }} Сервер</h2>
+                            <button type="button" id="demo-fill-btn" class="sample-button">Тестовые данные {{ icon('corner-down-right') }}</button>
+                        </div>
+                        <div class="panel-content space-y-4">
+                            <div class="hint-card real-only">
+                                Укажите публичный IP новой Ubuntu 22.04/24.04 VPS и SSH-доступ.
+                                Для первого запуска проще использовать пользователя <strong>root</strong>.
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label" for="vps-ip">Адрес</label>
+                                <div class="input-wrapper">
+                                    <span class="input-prefix">></span>
+                                    <input type="text" id="vps-ip" data-field="vps.ip" placeholder="203.0.113.10" class="input-field form-control" aria-describedby="deploy-form-error">
+                                </div>
+                            </div>
+                            <details class="workspace-ssh">
+                                <summary>SSH и тип окружения</summary>
+                                    <div class="input-group">
+                                        <label class="input-label" for="vps-port">Port</label>
+                                        <div class="input-wrapper">
+                                            <span class="input-prefix">></span>
+                                            <input type="number" id="vps-port" data-field="vps.port" value="22" class="input-field">
+                                        </div>
+                                    </div>
+                                    <div class="input-group">
+                                        <label class="input-label" for="vps-user">User</label>
+                                        <div class="input-wrapper">
+                                            <span class="input-prefix">></span>
+                                            <input type="text" id="vps-user" data-field="vps.user" value="root" class="input-field">
+                                        </div>
+                                    </div>
+                                    <div class="input-group">
+                                        <label class="input-label">Auth</label>
+                                        <div class="radio-group-inline">
+                                            <label class="radio-group">
+                                                <input type="radio" name="auth" value="key" data-field="vps.auth" checked>
+                                                <span class="radio-indicator"></span>
+                                                <span class="radio-label">SSH key</span>
+                                            </label>
+                                            <label class="radio-group">
+                                                <input type="radio" name="auth" value="password" data-field="vps.auth">
+                                                <span class="radio-indicator"></span>
+                                                <span class="radio-label">Password</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="input-group" id="key-path-group">
+                                        <label class="input-label" for="vps-keypath">Key path</label>
+                                        <div class="input-wrapper">
+                                            <span class="input-prefix">></span>
+                                            <input type="text" id="vps-keypath" data-field="vps.keyPath" placeholder="~/.ssh/id_ed25519" class="input-field">
+                                        </div>
+                                    </div>
+                                    <div class="input-group hidden" id="password-group">
+                                        <label class="input-label" for="vps-password">Password</label>
+                                        <div class="input-wrapper">
+                                            <span class="input-prefix">></span>
+                                            <input type="password" id="vps-password" data-field="vps.password" placeholder="••••••••" class="input-field">
+                                            <button type="button" class="password-toggle" data-target="vps-password">
+                                                <i data-lucide="eye" class="w-4 h-4"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="input-group">
+                                        <label class="input-label">Runtime</label>
+                                        <div class="radio-group-inline">
+                                            <label class="radio-group">
+                                                <input type="radio" name="runtime" value="native" data-field="vps.runtime" checked>
+                                                <span class="radio-indicator"></span>
+                                                <span class="radio-label">native</span>
+                                            </label>
+                                            <label class="radio-group">
+                                                <input type="radio" name="runtime" value="docker" data-field="vps.runtime">
+                                                <span class="radio-indicator"></span>
+                                                <span class="radio-label">docker</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                            </details>
+                        </div>
+                    </section>
+
+                    <!-- PROTOCOLS Section -->
+                    <section id="section-protocols" class="panel fade-in">
+                        <div class="panel-header">
+                            <h2>{{ icon('route-2') }} Протоколы</h2>
+                        </div>
+                        <div class="panel-content space-y-3">
+                            <div class="hint-card">
+                                Для обычных устройств рекомендуем
+                                <strong>VLESS Reality + Hysteria 2</strong>; OpenFlux нужен для отдельного
+                                клиента OpenFlux.
+                            </div>
+                            <label class="radio-group">
+                                <input type="checkbox" id="proto-hysteria2" data-field="protocols.hysteria2">
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">Hysteria 2</span>
+                                <span class="radio-desc">UDP/443, real TLS</span>
+                            </label>
+                            <label class="radio-group">
+                                <input type="checkbox" id="proto-vless" data-field="protocols.vless_reality">
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">VLESS Reality</span>
+                                <span class="radio-desc">TCP/443, Reality</span>
+                            </label>
+                            <label class="radio-group">
+                                <input type="checkbox" id="proto-openflux" data-field="protocols.openflux">
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">OpenFlux</span>
+                                <span class="radio-desc">separate client, tunnel</span>
+                            </label>
+                        </div>
+                    </section>
+
+                    <!-- DNS & CERTS Section -->
+                    <details id="section-dns" class="panel workspace-details hidden">
+                        <summary class="panel-header">DNS и сертификаты</summary>
+                        <div class="panel-content space-y-4">
+                            <div class="hint-card">
+                                Домен нужен для Hysteria 2. Сертификат должен быть выпущен именно на
+                                <strong>поддомен + корневой домен</strong>, например node1.example.com.
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label" for="dns-cftoken">CF Token</label>
+                                <div class="input-wrapper">
+                                    <span class="input-prefix">></span>
+                                    <input type="password" id="dns-cftoken" data-field="dns.cfToken" placeholder="••••••••••••••••" class="input-field">
+                                    <button type="button" class="password-toggle" data-target="dns-cftoken">
+                                        <i data-lucide="eye" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                                <span class="field-help">Необязательно. Оставьте пустым, если DNS-запись поддомена уже указывает на VPS.</span>
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label" for="dns-root">Root</label>
+                                <div class="input-wrapper">
+                                    <span class="input-prefix">></span>
+                                    <input type="text" id="dns-root" data-field="dns.root" placeholder="example.com" class="input-field">
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label" for="dns-sub">Sub</label>
+                                <div class="input-wrapper">
+                                    <span class="input-prefix">></span>
+                                    <input type="text" id="dns-sub" data-field="dns.sub" placeholder="node1" class="input-field">
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Source</label>
+                                <div class="radio-group-inline">
+                                    <label class="radio-group">
+                                        <input type="radio" name="certificate-source" value="upload" data-field="certs.source" checked>
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">с этого компьютера</span>
+                                    </label>
+                                    <label class="radio-group">
+                                        <input type="radio" name="certificate-source" value="vps" data-field="certs.source">
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">уже на VPS</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div id="certificate-upload-fields" class="space-y-4">
+                                <div class="input-group">
+                                    <label class="input-label">Cert</label>
+                                    <div class="file-input-wrapper">
+                                        <button type="button" class="file-select-btn" data-target="cert-file">[ select fullchain.pem ]</button>
+                                        <input type="file" id="cert-file" accept=".pem,.crt" class="hidden">
+                                        <span id="cert-status" class="file-status"></span>
+                                    </div>
+                                </div>
+                                <div class="input-group">
+                                    <label class="input-label">Key</label>
+                                    <div class="file-input-wrapper">
+                                        <button type="button" class="file-select-btn" data-target="key-file">[ select privkey.pem ]</button>
+                                        <input type="file" id="key-file" accept=".pem,.key" class="hidden">
+                                        <span id="key-status" class="file-status"></span>
+                                    </div>
+                                </div>
+                                <button type="button" id="validate-cert-btn" class="validate-btn mt-2">
+                                    [ ✓ validate ]
+                                </button>
+                            </div>
+                            <div id="certificate-vps-fields" class="space-y-4 hidden">
+                                <div class="hint-card success-hint">bypass проверит сертификат и ключ на VPS, затем скопирует их. Исходные файлы останутся без изменений.</div>
+                                <div class="input-group">
+                                    <label class="input-label" for="cert-vps-fullchain">Cert path</label>
+                                    <div class="input-wrapper">
+                                        <span class="input-prefix">></span>
+                                        <input type="text" id="cert-vps-fullchain" data-field="certs.vpsFullchainPath" placeholder="/etc/letsencrypt/live/vpn.example.com/fullchain.pem" class="input-field">
+                                    </div>
+                                </div>
+                                <div class="input-group">
+                                    <label class="input-label" for="cert-vps-privkey">Key path</label>
+                                    <div class="input-wrapper">
+                                        <span class="input-prefix">></span>
+                                        <input type="text" id="cert-vps-privkey" data-field="certs.vpsPrivkeyPath" placeholder="/etc/letsencrypt/live/vpn.example.com/privkey.pem" class="input-field">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- OPENFLUX Section -->
+                    <details id="section-openflux" class="panel workspace-details hidden">
+                        <summary class="panel-header">Настройки OpenFlux</summary>
+                        <div class="panel-content space-y-4">
+                            <div class="input-group">
+                                <label class="input-label">Transport</label>
+                                <div class="radio-group-inline">
+                                    <label class="radio-group">
+                                        <input type="radio" name="transport" value="cupsonline" data-field="openflux.transport">
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">cupsonline</span>
+                                    </label>
+                                    <label class="radio-group">
+                                        <input type="radio" name="transport" value="yandex" data-field="openflux.transport">
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">yandex</span>
+                                    </label>
+                                    <label class="radio-group">
+                                        <input type="radio" name="transport" value="vyandex" data-field="openflux.transport">
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">vyandex</span>
+                                    </label>
+                                    <label class="radio-group">
+                                        <input type="radio" name="transport" value="oneme" data-field="openflux.transport">
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">oneme</span>
+                                    </label>
+                                    <label class="radio-group">
+                                        <input type="radio" name="transport" value="mailru" data-field="openflux.transport">
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">mailru</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Mode</label>
+                                <div class="radio-group-inline">
+                                    <label class="radio-group">
+                                        <input type="radio" name="openflux-mode" value="l4" data-field="openflux.mode" checked>
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">l4 (safe)</span>
+                                    </label>
+                                    <label class="radio-group">
+                                        <input type="radio" name="openflux-mode" value="l3" data-field="openflux.mode">
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">l3 (fast)</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label">Codec</label>
+                                <div class="radio-group-inline">
+                                    <label class="radio-group">
+                                        <input type="radio" name="openflux-codec" value="batched" data-field="openflux.codec" checked>
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">batched</span>
+                                    </label>
+                                    <label class="radio-group">
+                                        <input type="radio" name="openflux-codec" value="legacy" data-field="openflux.codec">
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">legacy</span>
+                                    </label>
+                                </div>
+                                <span class="field-help">batched быстрее; legacy нужен только для старых клиентов.</span>
+                            </div>
+                            <div class="input-group hidden" id="openflux-localip-group">
+                                <label class="input-label" for="openflux-localip">Local IP</label>
+                                <div class="input-wrapper">
+                                    <span class="input-prefix">></span>
+                                    <input type="text" id="openflux-localip" data-field="openflux.localIp" placeholder="203.0.113.10" class="input-field">
+                                </div>
+                            </div>
+                            <div class="input-group hidden" id="document-url-group">
+                                <label class="input-label" for="openflux-yandex">Document URL</label>
+                                <div class="input-wrapper">
+                                    <span class="input-prefix">></span>
+                                    <input type="text" id="openflux-yandex" data-field="openflux.yandexUrl" placeholder="https://..." class="input-field">
+                                </div>
+                            </div>
+                            <div class="input-group hidden" id="oneme-group">
+                                <div class="input-group">
+                                    <label class="input-label" for="openflux-maxtoken">Max Token</label>
+                                    <div class="input-wrapper">
+                                        <span class="input-prefix">></span>
+                                        <input type="text" id="openflux-maxtoken" data-field="openflux.maxToken" placeholder="" class="input-field">
+                                    </div>
+                                </div>
+                                <div class="input-group">
+                                    <label class="input-label" for="openflux-maxuid">Max UID</label>
+                                    <div class="input-wrapper">
+                                        <span class="input-prefix">></span>
+                                        <input type="text" id="openflux-maxuid" data-field="openflux.maxUid" placeholder="" class="input-field">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label" for="openflux-enckey">Encryption key</label>
+                                <div class="input-wrapper">
+                                    <span class="input-prefix">></span>
+                                    <input type="password" id="openflux-enckey" data-field="openflux.encKey" placeholder="optional AES-256 key" class="input-field">
+                                    <button type="button" class="password-toggle" data-target="openflux-enckey">
+                                        <i data-lucide="eye" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <button type="button" id="openflux-client-btn" class="secondary-btn">[ client setup ]</button>
+                                <div id="openflux-client-output" class="config-block hidden">
+                                    <span class="config-label">Команда клиента</span>
+                                    <code id="openflux-client-command" class="config-value"></code>
+                                    <span class="config-label mt-4">Содержимое openflux.key</span>
+                                    <code id="openflux-client-key" class="config-value"></code>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- CLIENT ROUTING Section -->
+                    <details id="section-routing" class="panel workspace-details hidden">
+                        <summary class="panel-header">Маршрутизация клиента</summary>
+                        <div class="panel-content space-y-4">
+                            <div class="hint-card success-hint">
+                                Эти правила попадут в полный Xray JSON: российские и локальные сервисы
+                                откроются напрямую, остальной трафик пойдёт через VPS.
+                            </div>
+                            <label class="radio-group">
+                                <input type="checkbox" id="routing-ru-direct" data-field="routing.ruDirect" checked>
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">Российские домены и IP → напрямую</span>
+                            </label>
+                            <label class="radio-group">
+                                <input type="checkbox" id="routing-private-direct" data-field="routing.privateDirect" checked>
+                                <span class="radio-indicator"></span>
+                                <span class="radio-label">Локальная сеть → напрямую</span>
+                            </label>
+                            <div class="input-group">
+                                <label class="input-label">Ещё напрямую</label>
+                                <textarea id="routing-custom-domains" data-field="routing.customDirectDomains" class="input-field textarea-field" placeholder="bank.example.ru&#10;work.example.com"></textarea>
+                                <span class="field-help">Один домен на строку, без https:// и путей.</span>
+                            </div>
+                        </div>
+                    </details>
+
+                </div>
+
+                <section id="deploy-journal" class="card workspace-card journal" aria-labelledby="journal-title">
+                    <div class="card-body journal-heading">
+                        <div class="journal-title-row">
+                            <h2 id="journal-title" tabindex="-1">{{ icon('terminal-2') }} Журнал</h2>
+                            <span id="deploy-mode-badge" class="journal-mode">Демо</span>
+                        </div>
+                        <p id="deploy-status" class="journal-status" role="status">Ожидание запуска</p>
+                        <p id="last-demo-result" class="workspace-hint hidden"></p>
+                    </div>
+                    <div id="stages-bar" class="stages-bar" aria-label="Этапы выполнения"></div>
+                    <div id="terminal" class="terminal" tabindex="0" aria-label="Логи запуска">
+                        <div id="log-container" class="log-container">
+                            <div class="log-line default">Логи появятся после запуска.</div>
+                        </div>
+                    </div>
+                    <div class="card-body journal-actions">
+                        <button type="button" id="cancel-deploy-btn" class="btn btn-sm btn-outline-light" disabled>{{ icon('player-stop') }} Отменить</button>
+                        <button type="button" id="copy-log-btn" class="btn btn-sm btn-outline-light" disabled>{{ icon('copy') }} Копировать</button>
+                        <button type="button" id="download-log-btn" class="btn btn-sm btn-outline-light" disabled>{{ icon('download') }} Скачать лог</button>
+                    </div>
+                </section>
+            </div>
+
+            <div class="workspace-results">
+                <!-- CLIENTS Section -->
+                <section id="section-clients" class="panel fade-in hidden">
+                    <div class="panel-header">
+                        <span class="text-accent">▸</span>
+                        <span>CLIENTS</span>
+                    </div>
+                    <div class="panel-content">
+                        <div id="clients-list" class="space-y-2">
+                            <!-- Clients will be rendered here -->
+                        </div>
+                        <button type="button" id="add-client-btn" class="secondary-btn mt-4">
+                            [ + add client ]
+                        </button>
+                    </div>
+                </section>
+
+                <!-- SERVICES Section -->
+                <section id="section-services" class="panel fade-in hidden">
+                    <div class="panel-header">
+                        <span class="text-accent">▸</span>
+                        <span>SERVICES</span>
+                    </div>
+                    <div class="panel-content">
+                        <div id="services-list" class="space-y-2">
+                            <!-- Services will be rendered here -->
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
     </div>
 
     <!-- Modal: Add Client -->
@@ -449,7 +479,7 @@
             </div>
             <div class="modal-body">
                 <div class="input-group">
-                    <label class="input-label">Label</label>
+                    <label class="input-label" for="new-client-label">Label</label>
                     <div class="input-wrapper">
                         <span class="input-prefix">></span>
                         <input type="text" id="new-client-label" placeholder="client name" class="input-field">
@@ -479,7 +509,7 @@
             </div>
             <div class="modal-body">
                 <div class="input-group">
-                    <label class="input-label">Label</label>
+                    <label class="input-label" for="rename-client-label">Label</label>
                     <div class="input-wrapper">
                         <span class="input-prefix">></span>
                         <input type="text" id="rename-client-label" placeholder="new label" class="input-field">
@@ -523,7 +553,7 @@
 
     <!-- Modal: View Client Config -->
     <div id="view-config-modal" class="modal hidden">
-        <div class="modal-content">
+        <div class="modal-content modal-wide">
             <div class="modal-header">
                 <span class="text-accent">▸</span>
                 <span>Client config</span>
@@ -532,14 +562,54 @@
                 </button>
             </div>
             <div class="modal-body">
-                <div id="config-urls" class="space-y-2 font-mono text-sm">
-                    <!-- URLs will be rendered here -->
+                <div class="hint-card success-hint">
+                    Быстрый вариант: скопируйте ссылку подписки и добавьте её как удалённый
+                    профиль. Для встроенного RU → direct скачайте полный Xray JSON.
                 </div>
+                <div class="hint-card warning-hint">
+                    Старые профили VLESS / XHTTP после перехода на TCP Reality не работают.
+                    Удалите старую подписку в клиенте и добавьте новую ссылку отсюда.
+                    Если на устройстве уже включён другой VPN, сначала отключите его для проверки.
+                </div>
+                <div class="config-block">
+                    <span class="config-label">Ссылка подписки</span>
+                    <code id="subscription-url" class="config-value"></code>
+                </div>
+                <div id="config-urls" class="space-y-2 font-mono text-sm">
+                </div>
+                <div id="routing-summary" class="field-help"></div>
             </div>
             <div class="modal-footer">
                 <button type="button" id="copy-config-btn" class="secondary-btn">
-                    [⎘ copy]
+                    [⎘ copy subscription]
                 </button>
+                <button type="button" id="download-xray-btn" class="primary-btn">
+                    [⇩ Xray JSON + RU direct]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Help -->
+    <div id="help-modal" class="modal hidden">
+        <div class="modal-content modal-wide">
+            <div class="modal-header">
+                <div class="flex items-center gap-2"><span class="text-accent">▸</span><span>КАК ПОЛЬЗОВАТЬСЯ</span></div>
+                <button type="button" class="modal-close-btn" data-modal="help-modal"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+            <div class="modal-body help-content">
+                <div class="help-step"><b>01</b><div><strong>Подготовьте VPS</strong><span>Ubuntu 22.04/24.04, публичный IP и SSH root/ключ.</span></div></div>
+                <div class="help-step"><b>02</b><div><strong>Настройте домен</strong><span>Для Hysteria выберите поддомен и загрузите fullchain.pem + privkey.pem.</span></div></div>
+                <div class="help-step"><b>03</b><div><strong>Нажмите «Развернуть на VPS»</strong><span>Не закрывайте локальное приложение до завершения. Повторный деплой сохраняет ключи клиентов.</span></div></div>
+                <div class="help-step"><b>04</b><div><strong>Добавьте устройство</strong><span>Откройте клиента после деплоя, скопируйте subscription URL или скачайте Xray JSON.</span></div></div>
+                <div class="hint-card warning-hint">После смены XHTTP на TCP / Vision удалите старую подписку и импортируйте новую. Обновление удалённого клиента с уже удалённым токеном не поможет. Для проверки не запускайте одновременно два VPN.</div>
+                <h3>Рекомендуемые клиенты</h3>
+                <div class="client-guide-grid">
+                    <article><strong>Android / iOS</strong><span>Hiddify: установите из официального магазина, нажмите «Новый профиль» → «Добавить из буфера» и вставьте subscription URL.</span><a href="https://github.com/hiddify/hiddify-app/releases" target="_blank" rel="noreferrer">официальные загрузки ↗</a></article>
+                    <article><strong>Windows / macOS / Linux</strong><span>v2rayN: скачайте релиз, откройте «Subscription group» и добавьте URL. Для готового RU-routing импортируйте Xray JSON как пользовательский профиль.</span><a href="https://github.com/2dust/v2rayN/releases" target="_blank" rel="noreferrer">официальные загрузки ↗</a></article>
+                    <article><strong>OpenFlux</strong><span>Используйте отдельное официальное приложение. Android — APK из Releases, iOS — TestFlight; codec и transport должны совпадать с сервером.</span><a href="https://github.com/p1neappleXpress/OpenFlux" target="_blank" rel="noreferrer">инструкция OpenFlux ↗</a></article>
+                </div>
+                <div class="hint-card warning-hint">Ссылка подписки содержит доступ к вашему VPN. Не публикуйте её и не пересылайте посторонним.</div>
             </div>
         </div>
     </div>
@@ -547,6 +617,6 @@
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=6"></script>
 </body>
 </html>

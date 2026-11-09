@@ -14,12 +14,14 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
     PlainTextResponse,
+    RedirectResponse,
     Response,
 )
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +47,7 @@ from vpnforge.client_manager import (
 )
 from vpnforge.config import Settings, get_settings
 from vpnforge.dns_manager import CFAuthError, CFError, CFZoneNotFound, CloudflareDNS
+from vpnforge.local_auth import MIN_PASSWORD_LENGTH, SESSION_COOKIE, SESSION_SECONDS, LocalAuth
 from vpnforge.models import (
     CertInfo,
     CertState,
@@ -227,15 +230,133 @@ def create_app(
     async def _of_err(_request: Request, exc: OpenFluxError) -> JSONResponse:
         return _error_body("openflux_error", str(exc), 400)
 
+    auth = LocalAuth(settings.data_dir / "auth")
+    password_lock = asyncio.Lock()
+
+    def check_origin(request: Request) -> None:
+        origin = request.headers.get("origin")
+        expected = f"{request.url.scheme}://{request.url.netloc}"
+        if (
+            request.headers.get("sec-fetch-site") == "cross-site"
+            or (origin is not None and origin != expected)
+        ):
+            raise ApiError("cross_origin", "Запрос с другого сайта отклонён.", 403)
+
+    def require_session(request: Request) -> None:
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            check_origin(request)
+        if auth.profile_for(request.cookies.get(SESSION_COOKIE, "")) is None:
+            raise ApiError("auth_required", "Войдите в bypass.", 401)
+
+    private = APIRouter(dependencies=[Depends(require_session)])
+
+    def render_login(
+        request: Request, *, error: str = "", status: int = 200, profile: str = ""
+    ) -> Response:
+        setup = not auth.configured()
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "setup": setup,
+                "error": error,
+                "profile": profile,
+                "min_password_length": MIN_PASSWORD_LENGTH,
+            },
+            status_code=status,
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request) -> HTMLResponse:
-        return templates.TemplateResponse("index.html", {"request": request})
+    async def index(request: Request) -> Response:
+        profile = auth.profile_for(request.cookies.get(SESSION_COOKIE, ""))
+        if profile is None:
+            return RedirectResponse("/login", status_code=303)
+        return templates.TemplateResponse(
+            "index.html",
+            {"request": request, "profile": profile},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request) -> Response:
+        if auth.profile_for(request.cookies.get(SESSION_COOKIE, "")) is not None:
+            return RedirectResponse("/", status_code=303)
+        return render_login(request)
+
+    @app.post("/login", response_class=HTMLResponse)
+    async def login(
+        request: Request,
+        profile: str = Form(default=""),
+        password: str = Form(default=""),
+        confirmation: str = Form(default=""),
+        setup: bool = Form(default=False),
+    ) -> Response:
+        check_origin(request)
+        profile = profile.strip()
+        if not 2 <= len(profile) <= 40 or not profile.isprintable():
+            return render_login(request, error="Введите имя от 2 до 40 символов.", status=422)
+        if not MIN_PASSWORD_LENGTH <= len(password) <= 128:
+            return render_login(
+                request,
+                error=f"Введите пароль от {MIN_PASSWORD_LENGTH} до 128 символов.",
+                status=422,
+                profile=profile,
+            )
+
+        async with password_lock:
+            if setup:
+                if (
+                    request.url.hostname not in {"127.0.0.1", "localhost", "::1"}
+                    or request.client is None
+                    or request.client.host not in {"127.0.0.1", "::1"}
+                ):
+                    raise ApiError("setup_local_only", "Откройте bypass через localhost.", 403)
+                if auth.configured():
+                    return render_login(
+                        request, error="Профиль уже создан. Войдите с паролем.", status=409
+                    )
+                if password != confirmation:
+                    return render_login(
+                        request, error="Пароли не совпадают.", status=422, profile=profile
+                    )
+                token = await run_in_threadpool(auth.create_account, profile, password)
+                if token is None:
+                    return render_login(
+                        request, error="Профиль уже создан. Войдите с паролем.", status=409
+                    )
+            else:
+                token = await run_in_threadpool(auth.sign_in, profile, password)
+                if token is None:
+                    return render_login(
+                        request, error="Неверное имя или пароль.", status=401, profile=profile
+                    )
+
+        auth.sign_out(request.cookies.get(SESSION_COOKIE, ""))
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie(
+            SESSION_COOKIE,
+            token,
+            httponly=True,
+            secure=request.url.scheme == "https",
+            samesite="strict",
+            max_age=SESSION_SECONDS,
+        )
+        return response
+
+    @app.post("/logout")
+    async def logout(request: Request) -> Response:
+        check_origin(request)
+        auth.sign_out(request.cookies.get(SESSION_COOKIE, ""))
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE)
+        return response
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/api/cert/validate")
+    @private.post("/api/cert/validate")
     async def cert_validate(
         fullchain: UploadFile = File(...),
         privkey: UploadFile = File(...),
@@ -245,7 +366,7 @@ def create_app(
         pk = await privkey.read()
         return cert_validator.validate_cert_bytes(fc, pk, domain)
 
-    @app.post("/api/dns/upsert")
+    @private.post("/api/dns/upsert")
     async def dns_upsert(body: DnsUpsertRequest) -> dict[str, str]:
         token = body.api_token or ctx.settings.cf_api_token
         if not token:
@@ -257,11 +378,11 @@ def create_app(
         record_id = cf.upsert_a_record(zone_id, fqdn, body.ip)
         return {"zone_id": zone_id, "record_id": record_id}
 
-    @app.post("/api/secrets/load")
+    @private.post("/api/secrets/load")
     async def secrets_load(body: SecretsIpRequest) -> Secrets:
         return ctx.store.load(body.ip)
 
-    @app.post("/api/secrets/export")
+    @private.post("/api/secrets/export")
     async def secrets_export(body: SecretsIpRequest) -> Response:
         raw = ctx.store.export(body.ip)
         return Response(
@@ -270,7 +391,7 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="{body.ip}.json"'},
         )
 
-    @app.post("/api/secrets/import")
+    @private.post("/api/secrets/import")
     async def secrets_import(
         ip: str = Form(...),
         file: UploadFile = File(...),
@@ -278,17 +399,17 @@ def create_app(
         raw = await file.read()
         return ctx.store.import_(ip, raw)
 
-    @app.get("/api/clients")
+    @private.get("/api/clients")
     async def clients_list(ip: str = Query(...)) -> list[Client]:
         if not ctx.store.exists(ip):
             return []
         return ctx.clients.list_clients(ip)
 
-    @app.post("/api/clients")
+    @private.post("/api/clients")
     async def clients_add(body: ClientCreateRequest) -> Client:
         return ctx.clients.add_client(body.ip, body.label)
 
-    @app.patch("/api/clients/{client_id}")
+    @private.patch("/api/clients/{client_id}")
     async def clients_patch(client_id: str, body: ClientPatchRequest) -> Client:
         if body.label is None and body.disabled is None:
             raise ApiError("validation_error", "label or disabled is required", 422)
@@ -302,18 +423,18 @@ def create_app(
         assert client is not None
         return client
 
-    @app.delete("/api/clients/{client_id}")
+    @private.delete("/api/clients/{client_id}")
     async def clients_delete(
         client_id: str, ip: str = Query(...)
     ) -> dict[str, bool]:
         ctx.clients.remove_client(ip, client_id)
         return {"ok": True}
 
-    @app.post("/api/clients/rotate")
+    @private.post("/api/clients/rotate")
     async def clients_rotate(body: ClientRotateRequest) -> list[Client]:
         return ctx.clients.rotate_all(body.ip)
 
-    @app.post("/api/deploy")
+    @private.post("/api/deploy")
     async def deploy_start(
         payload: str = Form(...),
         fullchain: UploadFile | None = File(default=None),
@@ -364,7 +485,7 @@ def create_app(
             content={"job_id": job_id, "status": "pending"},
         )
 
-    @app.get("/api/deploy/stream/{job_id}")
+    @private.get("/api/deploy/stream/{job_id}")
     async def deploy_stream(job_id: str) -> EventSourceResponse:
         job = ctx.jobs.get(job_id)
         if job is None:
@@ -380,7 +501,7 @@ def create_app(
 
         return EventSourceResponse(events())
 
-    @app.post("/api/deploy/demo", status_code=202)
+    @private.post("/api/deploy/demo", status_code=202)
     async def deploy_demo(payload: str = Form(...)) -> dict[str, str]:
         try:
             req = DeployRequest.model_validate_json(payload)
@@ -404,7 +525,7 @@ def create_app(
         )
         return {"job_id": job_id, "status": "pending"}
 
-    @app.post("/api/deploy/cancel/{job_id}")
+    @private.post("/api/deploy/cancel/{job_id}")
     async def deploy_cancel(job_id: str) -> dict[str, str]:
         job = ctx.jobs.get(job_id)
         if job is None:
@@ -459,7 +580,7 @@ def create_app(
                 )
         raise HTTPException(status_code=404, detail="not found")
 
-    @app.get("/api/openflux/client")
+    @private.get("/api/openflux/client")
     async def openflux_client(ip: str = Query(...)) -> dict[str, str | None]:
         secrets = ctx.store.load(ip)
         if not secrets.protocols.openflux:
@@ -472,6 +593,7 @@ def create_app(
             "encryption_key": secrets.openflux.encryption_key,
         }
 
+    app.include_router(private)
     return app
 
 

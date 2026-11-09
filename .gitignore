@@ -18,3 +18,5 @@ data/runs/
 
 # runtime
 *.log
+# Local authentication database
+data/auth/

@@ -1,0 +1,76 @@
+{% from "icons.html" import icon -%}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ 'Новый профиль' if setup else 'Вход' }} · bypass</title>
+    <link rel="icon" href="/static/favicon.svg?v=3" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/style.css?v=2">
+    <link rel="stylesheet" href="/static/workspace.css?v=7">
+</head>
+<body class="login-page">
+    <header class="login-masthead">
+        <span class="bypass-wordmark"><img src="/static/favicon.svg?v=3" width="32" height="32" alt="">bypass</span>
+        <span class="local-indicator"><span></span> Локальный режим</span>
+    </header>
+    <main class="login-layout">
+        <section class="login-intro" aria-labelledby="login-brand">
+            <h1 id="login-brand">VPN на своём<br class="login-title-break"> сервере<span>.</span></h1>
+            <p class="login-lede">Подготовьте конфигурацию, проверьте запуск в демо и разверните VPN на своём VPS.</p>
+            <div class="login-route" aria-hidden="true">
+                <svg viewBox="0 0 480 102" fill="none">
+                    <defs>
+                        <pattern id="route-grid" width="16" height="16" patternUnits="userSpaceOnUse">
+                            <circle cx="1" cy="1" r="1" fill="currentColor" opacity=".3"/>
+                        </pattern>
+                    </defs>
+                    <path fill="url(#route-grid)" d="M0 0h480v102H0z"/>
+                    <path class="route-branch" d="M32 76h128l37-51h132l24 25h95"/>
+                    <path class="route-line" d="M32 76h128l40-28h80l40 28h128"/>
+                    <circle class="route-ring" cx="32" cy="76" r="7"/>
+                    <circle class="route-node" cx="32" cy="76" r="3"/>
+                    <image href="/static/favicon.svg?v=3" x="226" y="34" width="28" height="28"/>
+                    <circle class="route-ring" cx="448" cy="76" r="7"/>
+                    <circle class="route-node" cx="448" cy="76" r="3"/>
+                </svg>
+                <div class="login-route-labels"><span>Локально</span><span>bypass</span><span>VPS</span></div>
+            </div>
+        </section>
+        <section class="card login-card" aria-labelledby="login-title">
+            <div class="card-body">
+                <h2 id="login-title">{{ 'Создайте профиль' if setup else 'Вход в bypass' }}</h2>
+                <p>{{ 'Один профиль для управления bypass на этом компьютере.' if setup else 'Введите имя профиля и пароль.' }}</p>
+                <form method="post" action="/login">
+                    {% if setup %}<input type="hidden" name="setup" value="true">{% endif %}
+                    <div class="form-group">
+                        <label for="profile">{{ icon('user') }} Имя профиля</label>
+                        <input class="form-control" id="profile" name="profile" placeholder="Например, demo"
+                               value="{{ profile or '' }}" autocomplete="username"
+                               minlength="2" maxlength="40" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">{{ icon('lock') }} Пароль</label>
+                        <input class="form-control" type="password" id="password" name="password"
+                               autocomplete="{{ 'new-password' if setup else 'current-password' }}"
+                               minlength="{{ min_password_length }}" maxlength="128" required
+                               {% if setup %}aria-describedby="password-hint"{% endif %}>
+                        {% if setup %}<small id="password-hint">Минимум {{ min_password_length }} символов.</small>{% endif %}
+                    </div>
+                    {% if setup %}
+                    <div class="form-group">
+                        <label for="confirmation">{{ icon('lock') }} Повторите пароль</label>
+                        <input class="form-control" type="password" id="confirmation" name="confirmation"
+                               autocomplete="new-password" minlength="{{ min_password_length }}"
+                               maxlength="128" required>
+                    </div>
+                    {% endif %}
+                    {% if error %}<p class="alert alert-danger" id="login-error" role="alert">{{ error }}</p>{% endif %}
+                    <button class="btn btn-primary btn-block" type="submit">{{ 'Создать профиль' if setup else 'Войти' }} {{ icon('arrow-up-right') }}</button>
+                </form>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

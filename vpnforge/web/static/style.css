@@ -1,18 +1,18 @@
-/* VPN-Forge JARVIS-style CSS */
+/* bypass JARVIS-style CSS */
 
 :root {
-    --bg-base: #0A0E1A;
-    --bg-panel: #0F1626;
-    --bg-elevated: #16203A;
-    --bg-terminal: #05080F;
-    --border-subtle: #1F2A44;
-    --border-glow: #2E4A7A;
-    --accent: #3B82F6;
-    --accent-bright: #60A5FA;
-    --accent-glow: #93C5FD;
-    --text: #E5E7EB;
-    --text-muted: #94A3B8;
-    --text-dim: #64748B;
+    --bg-base: #151713;
+    --bg-panel: #1C1F19;
+    --bg-elevated: #252A21;
+    --bg-terminal: #11130F;
+    --border-subtle: #30362C;
+    --border-glow: #454D40;
+    --accent: #BFE475;
+    --accent-bright: #D7F69A;
+    --accent-glow: #E5F8C6;
+    --text: #F0F1E9;
+    --text-muted: #ACB2A4;
+    --text-dim: #858E7D;
     --success: #10B981;
     --warning: #F59E0B;
     --error: #EF4444;
@@ -20,6 +20,11 @@
 
 * {
     box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
 }
 
 body {
@@ -47,6 +52,39 @@ body {
 
 .panel-content {
     padding: 16px;
+}
+
+.hint-card {
+    padding: 12px 14px;
+    border: 1px solid var(--border-glow);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    background: rgba(191, 228, 117, 0.08);
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.success-hint {
+    border-left-color: var(--success);
+    background: rgba(16, 185, 129, 0.07);
+}
+
+.warning-hint {
+    border-left-color: var(--warning);
+    background: rgba(245, 158, 11, 0.07);
+}
+
+.field-help {
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.textarea-field {
+    min-height: 76px;
+    resize: vertical;
+    line-height: 1.5;
 }
 
 /* Input Styles */
@@ -94,7 +132,7 @@ body {
 
 .input-field:focus {
     border-bottom-color: var(--border-glow);
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.25);
+    box-shadow: 0 0 20px rgba(191, 228, 117, 0.25);
 }
 
 .password-toggle {
@@ -175,6 +213,7 @@ body {
 
 .radio-group-inline {
     display: flex;
+    flex-wrap: wrap;
     gap: 24px;
 }
 
@@ -233,12 +272,12 @@ body {
     font-weight: 500;
     cursor: pointer;
     transition: all 200ms;
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.25);
+    box-shadow: 0 0 20px rgba(191, 228, 117, 0.25);
 }
 
 .forge-btn:hover {
     background: var(--accent-bright);
-    box-shadow: 0 0 30px rgba(59, 130, 246, 0.4);
+    box-shadow: 0 0 30px rgba(191, 228, 117, 0.4);
 }
 
 .forge-btn:disabled {
@@ -514,6 +553,104 @@ body {
     animation: fadeIn 180ms ease-out;
 }
 
+.modal-wide {
+    max-width: 820px;
+    max-height: 88vh;
+    overflow-y: auto;
+}
+
+.config-block {
+    margin: 16px 0;
+}
+
+.config-label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--accent-bright);
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.config-value {
+    display: block;
+    padding: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    background: var(--bg-terminal);
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+.help-content h3 {
+    margin: 24px 0 12px;
+    color: var(--accent-bright);
+    font-size: 13px;
+}
+
+.help-step {
+    display: flex;
+    gap: 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.help-step > b {
+    color: var(--accent);
+}
+
+.help-step div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.help-step span,
+.client-guide-grid span {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.client-guide-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.client-guide-grid article {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    background: var(--bg-panel);
+}
+
+.client-guide-grid a {
+    color: var(--accent-bright);
+    font-size: 11px;
+    text-decoration: none;
+}
+
+.client-guide-grid a:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+    .client-guide-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .modal-footer {
+        flex-wrap: wrap;
+    }
+}
+
 .modal-header {
     padding: 16px;
     border-bottom: 1px solid var(--border-subtle);
@@ -579,6 +716,43 @@ body {
 }
 
 /* Utilities */
+.antialiased {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.bg-base {
+    background-color: var(--bg-base);
+}
+
+.bg-panel {
+    background-color: var(--bg-panel);
+}
+
+.border {
+    border: 1px solid var(--border-subtle);
+}
+
+.border-subtle {
+    border-color: var(--border-subtle);
+}
+
+.text-text {
+    color: var(--text);
+}
+
+.text-muted {
+    color: var(--text-muted);
+}
+
+.text-accent {
+    color: var(--accent);
+}
+
+.text-white {
+    color: #fff;
+}
+
 .hidden {
     display: none !important;
 }
@@ -597,6 +771,31 @@ body {
 
 .p-2 {
     padding: 8px;
+}
+
+.px-2 {
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.px-3 {
+    padding-left: 12px;
+    padding-right: 12px;
+}
+
+.px-4 {
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+.py-0\.5 {
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+
+.py-2 {
+    padding-top: 8px;
+    padding-bottom: 8px;
 }
 
 .bg-terminal {
@@ -633,6 +832,10 @@ body {
 
 .gap-2 {
     gap: 8px;
+}
+
+.gap-1 {
+    gap: 4px;
 }
 
 .gap-3 {
@@ -735,6 +938,10 @@ body {
     align-items: center;
 }
 
+.justify-center {
+    justify-content: center;
+}
+
 .justify-between {
     justify-content: space-between;
 }
@@ -745,6 +952,18 @@ body {
 
 .animate-pulse {
     animation: pulse 2s infinite;
+}
+
+.rounded-full {
+    border-radius: 9999px;
+}
+
+.transition-all {
+    transition: all 150ms;
+}
+
+.transition-colors {
+    transition: color 150ms, background-color 150ms, border-color 150ms;
 }
 
 /* Animations */
@@ -842,10 +1061,10 @@ body {
 
 @keyframes glowPulse {
     0%, 100% {
-        box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        box-shadow: 0 0 20px rgba(191, 228, 117, 0.3);
     }
     50% {
-        box-shadow: 0 0 30px rgba(59, 130, 246, 0.6);
+        box-shadow: 0 0 30px rgba(191, 228, 117, 0.6);
     }
 }
 
@@ -858,7 +1077,7 @@ body {
 }
 
 .bg-accent\/20 {
-    background-color: rgba(59, 130, 246, 0.2);
+    background-color: rgba(191, 228, 117, 0.2);
 }
 
 .rounded-lg {
