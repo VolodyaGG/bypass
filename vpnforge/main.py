@@ -7,8 +7,10 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 import uuid
 from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,12 +24,14 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 from sse_starlette.sse import EventSourceResponse
 
 from vpnforge import (
     cert_validator,
     config_builder,
     crypto_utils,
+    demo_deploy,
     inventory_builder,
     sub_builder,
 )
@@ -94,6 +98,7 @@ class DeployJob:
     error: str | None = None
     done: asyncio.Event = field(default_factory=asyncio.Event)
     _queues: list[asyncio.Queue[dict[str, str] | None]] = field(default_factory=list)
+    demo_task: asyncio.Task[None] | None = None
 
     def emit(self, event: str, data: str) -> None:
         payload = json.dumps({"line": data}, ensure_ascii=False) if event == "log" else data
@@ -375,11 +380,45 @@ def create_app(
 
         return EventSourceResponse(events())
 
+    @app.post("/api/deploy/demo", status_code=202)
+    async def deploy_demo(payload: str = Form(...)) -> dict[str, str]:
+        try:
+            req = DeployRequest.model_validate_json(payload)
+        except ValidationError as exc:
+            raise ApiError(
+                "validation_error", "Invalid demo deploy payload", 422
+            ) from exc
+
+        molecule = shutil.which("molecule")
+        if molecule is None:
+            raise ApiError(
+                "molecule_not_found", "Install Molecule to run the demo deployment", 503
+            )
+
+        job_id = uuid.uuid4().hex
+        job = DeployJob(job_id=job_id)
+        ctx.jobs[job_id] = job
+        job.demo_task = asyncio.create_task(
+            _run_demo(job, req, molecule, ctx.settings.ansible_timeout),
+            name=f"demo-deploy-{job_id}",
+        )
+        return {"job_id": job_id, "status": "pending"}
+
     @app.post("/api/deploy/cancel/{job_id}")
     async def deploy_cancel(job_id: str) -> dict[str, str]:
         job = ctx.jobs.get(job_id)
         if job is None:
             raise ApiError("job_not_found", f"job {job_id} not found", 404)
+
+        if job.demo_task is not None:
+            if not job.done.is_set():
+                if not job.demo_task.cancelling():
+                    job.demo_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await job.demo_task
+                if not job.done.is_set():
+                    job.finish("cancelled", error="Deployment cancelled by user")
+            return {"status": job.status}
 
         # Note: This is a simplified cancel - in production you'd want to actually
         # cancel the running Ansible process. For now, we'll just mark it as cancelled.
@@ -487,6 +526,31 @@ def _apply_cert_state(secrets: Secrets, info: CertInfo | None) -> None:
         issuer=info.issuer_cn,
         sha256=info.sha256,
     )
+
+
+async def _run_demo(job: DeployJob, req: DeployRequest, molecule: str, timeout: int) -> None:
+    job.status = "running"
+    job.emit("log", "Demo deployment: running Molecule on localhost")
+    try:
+        with tempfile.TemporaryDirectory(prefix="vpnforge-demo-") as work_dir:
+            run = await demo_deploy.run(molecule, Path(work_dir), req, timeout)
+            try:
+                async for line in run:
+                    job.emit("log", line)
+            finally:
+                await run.aclose()
+        if run.timed_out:
+            job.finish("failed", error="Molecule timed out")
+        elif run.returncode != 0:
+            job.finish("failed", error=f"Molecule exited with {run.returncode}")
+        else:
+            job.finish("success")
+    except asyncio.CancelledError:
+        job.finish("cancelled", error="Deployment cancelled by user")
+        raise
+    except Exception:
+        logger.exception("demo deployment %s crashed", job.job_id)
+        job.finish("failed", error="Could not run the Molecule demo")
 
 
 async def _run_deploy(

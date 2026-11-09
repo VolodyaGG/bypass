@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from pathlib import Path
@@ -53,9 +54,12 @@ class AnsibleRun:
         self,
         proc: asyncio.subprocess.Process,
         timeout: float,
+        *,
+        process_group: bool = False,
     ) -> None:
         self._proc = proc
         self._timeout = max(timeout, 1.0)
+        self._process_group = process_group
         self.returncode: int | None = None
         self.timed_out: bool = False
         self._finished: bool = False
@@ -115,13 +119,15 @@ class AnsibleRun:
                 await self._kill_and_mark_timeout()
 
     async def _kill_and_mark_timeout(self) -> None:
-        if self._proc.returncode is None:
-            with suppress(ProcessLookupError):
+        with suppress(ProcessLookupError):
+            if self._process_group:
+                os.killpg(self._proc.pid, signal.SIGKILL)
+            elif self._proc.returncode is None:
                 self._proc.kill()
-            await self._proc.wait()
+        await self._proc.wait()
         self.returncode = self._proc.returncode
         self.timed_out = True
-        logger.warning("ansible-playbook killed (timeout or early exit)")
+        logger.warning("Ansible command stopped (timeout or early exit)")
 
     async def aclose(self) -> None:
         """Stop the underlying process when a consumer exits early."""
