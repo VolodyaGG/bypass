@@ -204,6 +204,21 @@ def test_gv_hysteria_accepts_existing_vps_certificate() -> None:
     assert hysteria["vps_fullchain_path"].endswith("/fullchain.pem")
 
 
+def test_gv_hysteria_can_issue_certificate_without_uploaded_files() -> None:
+    gv = build_group_vars(
+        _secrets(domain="Node1.Example.Com."), cert=None, certificate_source="letsencrypt"
+    )
+    assert gv["hysteria2"]["acme_domain"] == "node1.example.com"
+    assert gv["hysteria2"]["fullchain_b64"] is None
+    assert gv["vpnforge"]["subscription_scheme"] == "https"
+
+
+@pytest.mark.parametrize("domain", ["../escape", "*.example.com", "1.2.3.4", "--help"])
+def test_gv_auto_certificate_rejects_unsafe_domains(domain: str) -> None:
+    with pytest.raises(InventoryError):
+        build_group_vars(_secrets(domain=domain), cert=None, certificate_source="letsencrypt")
+
+
 def test_gv_hysteria_vps_certificate_requires_both_paths() -> None:
     with pytest.raises(InventoryError, match="certificate paths on VPS"):
         build_group_vars(

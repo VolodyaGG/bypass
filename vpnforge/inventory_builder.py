@@ -20,7 +20,7 @@ from typing import Any, cast
 
 import yaml
 
-from vpnforge.models import CertInfo, Secrets, VPSConnection
+from vpnforge.models import CertInfo, Secrets, VPSConnection, normalize_acme_domain
 from vpnforge.openflux_manager import build_exit_node_argv
 
 
@@ -83,7 +83,7 @@ def build_group_vars(
       secrets: loaded Secrets document for this VPS.
       cert: parsed CertInfo (None if hysteria2 disabled).
       runtime: "native" or "docker".
-      certificate_source: "upload" or files already present on "vps".
+      certificate_source: "upload", files on "vps", or "letsencrypt" issuance.
       fullchain_b64 / privkey_b64: base64 PEM files for upload mode.
       clients_json_path: where sub_server reads clients.json on the VPS.
       openflux_env: extra env vars for the openflux service unit.
@@ -95,7 +95,7 @@ def build_group_vars(
         raise InventoryError(f"unknown runtime: {runtime!r}")
 
     if secrets.protocols.hysteria2:
-        if certificate_source not in ("upload", "vps"):
+        if certificate_source not in ("upload", "vps", "letsencrypt"):
             raise InventoryError(f"unknown certificate source: {certificate_source!r}")
         if certificate_source == "upload":
             if fullchain_b64 is None or privkey_b64 is None:
@@ -104,10 +104,17 @@ def build_group_vars(
                 )
             if cert is None:
                 raise InventoryError("hysteria2 requires parsed CertInfo")
-        elif not vps_fullchain_path or not vps_privkey_path:
+        elif certificate_source == "vps" and (not vps_fullchain_path or not vps_privkey_path):
             raise InventoryError("hysteria2 requires certificate paths on VPS")
         if secrets.domain is None:
             raise InventoryError("hysteria2 requires secrets.domain")
+        if certificate_source == "letsencrypt":
+            try:
+                acme_domain = normalize_acme_domain(secrets.domain)
+            except ValueError as exc:
+                raise InventoryError(str(exc)) from exc
+        else:
+            acme_domain = None
 
     gv: dict[str, Any] = {
         "vpnforge": {
@@ -153,6 +160,7 @@ def build_group_vars(
             "privkey_b64": privkey_b64,
             "vps_fullchain_path": vps_fullchain_path,
             "vps_privkey_path": vps_privkey_path,
+            "acme_domain": acme_domain,
         }
         if cert is not None:
             gv["cert"] = {

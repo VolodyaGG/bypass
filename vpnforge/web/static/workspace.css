@@ -20,7 +20,7 @@ body {
         radial-gradient(ellipse 62% 60% at 82% 26%, rgba(81, 140, 116, .30), transparent 77%),
         radial-gradient(ellipse 55% 48% at 36% 15%, rgba(170, 201, 94, .12), transparent 72%),
         radial-gradient(ellipse 55% 45% at 88% 62%, rgba(80, 119, 133, .17), transparent 78%),
-        #111613;
+        var(--bg-base);
     background-repeat: no-repeat;
     background-size: 100% max(760px, 100vh);
 }
@@ -97,7 +97,7 @@ body {
     display: grid;
     grid-template-columns: minmax(260px, 2fr) minmax(0, 3fr);
     align-items: start;
-    gap: clamp(24px, 4vw, 56px);
+    gap: clamp(16px, 2.5vw, 28px);
 }
 
 .workspace-settings, .workspace-results {
@@ -155,7 +155,7 @@ body {
 
 .workspace-card, .workspace-results .panel, .login-card, .workspace-nav, .login-masthead {
     min-width: 0;
-    background: var(--glass-film);
+    background: var(--bg-panel);
     border: 1px solid var(--glass-stroke);
     border-top-color: var(--glass-edge);
     border-radius: 20px;
@@ -165,6 +165,7 @@ body {
 
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
     .workspace-card, .workspace-results .panel, .login-card, .workspace-nav, .login-masthead {
+        background: var(--glass-film);
         -webkit-backdrop-filter: blur(20px) saturate(1.24);
         backdrop-filter: blur(20px) saturate(1.24);
     }
@@ -238,6 +239,31 @@ body {
 
 .workspace .radio-group {
     margin: 0;
+    position: relative;
+}
+
+.workspace .radio-group input[type="checkbox"],
+.workspace .radio-group input[type="radio"] {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.workspace .radio-group input:focus-visible + .radio-indicator {
+    outline: 2px solid var(--accent-bright);
+    outline-offset: 3px;
+}
+
+.workspace .radio-group input[aria-invalid="true"] + .radio-indicator {
+    outline: 2px solid var(--error);
+    outline-offset: 3px;
+}
+
+.workspace .radio-group:has(input:disabled) {
+    cursor: default;
+    opacity: .65;
 }
 
 .workspace-details summary, .workspace-ssh summary {
@@ -376,6 +402,8 @@ body {
 .journal-status[data-status="success"] { color: #6ee7b7; }
 .journal-status[data-status="failed"] { color: #fca5a5; }
 .journal-status[data-status="cancelled"] { color: #fcd34d; }
+.journal-status[data-status="reconnecting"],
+.journal-status[data-status="interrupted"] { color: #fcd34d; }
 
 .journal-heading {
     display: grid;
@@ -398,7 +426,7 @@ body {
     flex: none;
     height: clamp(190px, 36vh, 420px);
     border-block: 1px solid var(--glass-stroke);
-    background: rgba(10, 16, 13, .74);
+    background: var(--bg-terminal);
     padding: 14px var(--panel-inset);
     font: 13px/1.55 "JetBrains Mono", ui-monospace, Menlo, monospace;
 }
@@ -599,11 +627,16 @@ body {
 }
 
 .login-card {
+    --login-card-fill: var(--bg-panel);
     background:
         radial-gradient(ellipse at 92% 0%, rgba(214, 249, 181, .17), transparent 60%),
-        var(--glass-film);
+        var(--login-card-fill);
     border-radius: 28px;
     box-shadow: var(--glass-shadow), 0 30px 66px rgba(5, 12, 9, .32);
+}
+
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    .login-card { --login-card-fill: var(--glass-film); }
 }
 
 .login-card .card-body {
@@ -616,12 +649,35 @@ body {
 .login-card .form-group small { display: block; margin-top: 5px; }
 
 .login-card .form-control {
+    font-size: 14px;
     background: rgba(8, 15, 12, .46);
     border-color: var(--glass-stroke);
     border-radius: 12px;
     color: var(--text);
     min-height: 46px;
 }
+
+.login-password {
+    position: relative;
+}
+
+.login-password .form-control {
+    padding-inline-end: 88px;
+}
+
+.password-visibility {
+    position: absolute;
+    inset-block: 4px;
+    inset-inline-end: 4px;
+    padding-inline: 8px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+}
+
+.password-visibility:hover { color: var(--accent-bright); }
 
 .login-card .form-control:focus {
     background: rgba(8, 15, 12, .6);

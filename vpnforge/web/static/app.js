@@ -1,12 +1,12 @@
-// bypass Frontend - JARVIS-style UI
+// bypass workspace
 // Backend integration
 
 // State management
 const state = {
     protocols: { hysteria2: false, vless_reality: false, openflux: false },
     vps: { ip: '', port: 22, user: 'root', auth: 'key', keyPath: '', password: '', runtime: 'native' },
-    dns: { cfToken: '', root: '', sub: '' },
-    certs: { source: 'upload', vpsFullchainPath: '', vpsPrivkeyPath: '', info: null },
+    dns: { cfToken: '', domain: '' },
+    certs: { source: 'letsencrypt', vpsFullchainPath: '', vpsPrivkeyPath: '', info: null },
     openflux: { transport: null, mode: 'l4', codec: 'batched', localIp: '', yandexUrl: '', maxToken: '', maxUid: '', encKey: '' },
     routing: { ruDirect: true, privateDirect: true, customDirectDomains: '' },
     deploy: { jobId: null, running: false, stages: {}, logs: [], mode: 'demo' },
@@ -17,6 +17,7 @@ const state = {
 };
 
 const formGroups = ['protocols', 'vps', 'dns', 'certs', 'openflux', 'routing'];
+const formDefaults = Object.fromEntries(formGroups.map(group => [group, { ...state[group] }]));
 const workspaceForms = { demo: Object.fromEntries(
     formGroups.map(group => [group, { ...state[group] }])
 ) };
@@ -60,6 +61,11 @@ function initIcons() {
 }
 
 // LocalStorage helpers
+function savedDomain(dns = {}) {
+    if (typeof dns.domain === 'string') return dns.domain;
+    return typeof dns.root === 'string' ? [dns.sub, dns.root].filter(value => typeof value === 'string' && value).join('.') : '';
+}
+
 function saveState() {
     try {
         if (deployMode === 'demo') {
@@ -67,14 +73,13 @@ function saveState() {
                 ip: state.vps.ip,
                 runtime: state.vps.runtime,
                 protocols: state.protocols,
-                root: state.dns.root,
-                sub: state.dns.sub,
+                domain: state.dns.domain,
                 last: lastDemo
             }));
         } else {
             const toSave = Object.fromEntries(formGroups.map(group => [group, state[group]]));
             toSave.vps = { ...state.vps, password: '' };
-            toSave.dns = { ...state.dns, cfToken: '' };
+            toSave.dns = { domain: state.dns.domain, cfToken: '' };
             toSave.openflux = { ...state.openflux, encKey: '' };
             localStorage.setItem('vpnforge-state', JSON.stringify(toSave));
         }
@@ -83,24 +88,56 @@ function saveState() {
     }
 }
 
-function loadState() {
+function readStoredObject(key) {
     try {
-        const parsed = JSON.parse(localStorage.getItem('vpnforge-state')) || {};
-        formGroups.forEach(group => Object.assign(state[group], parsed[group]));
-        if (state.openflux.mode === 'proxy') state.openflux.mode = 'l4';
-        if (state.openflux.mode === 'raw') state.openflux.mode = 'l3';
-        const saved = JSON.parse(localStorage.getItem(demoStorageKey()));
-        if (saved) {
-            const { vps, dns, protocols } = workspaceForms.demo;
-            vps.ip = saved.ip || '';
-            vps.runtime = saved.runtime === 'docker' ? 'docker' : 'native';
-            dns.root = saved.root || '';
-            dns.sub = saved.sub || '';
-            Object.keys(protocols).forEach(name => { protocols[name] = Boolean(saved.protocols?.[name]); });
-            lastDemo = saved.last || null;
-        }
+        const value = JSON.parse(localStorage.getItem(key));
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     } catch (error) {
         console.warn('Could not load workspace settings', error);
+        return {};
+    }
+}
+
+function loadState() {
+    const parsed = readStoredObject('vpnforge-state');
+    formGroups.forEach(group => {
+        Object.entries(formDefaults[group]).forEach(([key, fallback]) => {
+            const value = parsed[group]?.[key];
+            if (typeof value === typeof fallback && value !== null) state[group][key] = value;
+        });
+    });
+    state.dns.domain = savedDomain(parsed.dns || {});
+    // Old versions may have persisted credentials. Never restore them into the form.
+    state.vps.password = state.dns.cfToken = state.openflux.encKey = '';
+    const choices = {
+        'vps.auth': ['key', 'password'], 'vps.runtime': ['native', 'docker'],
+        'certs.source': ['letsencrypt', 'upload', 'vps'],
+        'openflux.transport': ['cupsonline', 'yandex', 'vyandex', 'oneme', 'mailru'],
+        'openflux.mode': ['l3', 'l4'], 'openflux.codec': ['batched', 'legacy']
+    };
+    if (parsed.openflux?.mode === 'proxy') state.openflux.mode = 'l4';
+    if (parsed.openflux?.mode === 'raw') state.openflux.mode = 'l3';
+    if (choices['openflux.transport'].includes(parsed.openflux?.transport)) {
+        state.openflux.transport = parsed.openflux.transport;
+    }
+    Object.entries(choices).forEach(([field, values]) => {
+        const [group, key] = field.split('.');
+        if (!values.includes(state[group][key])) state[group][key] = formDefaults[group][key];
+    });
+    const port = Number(parsed.vps?.port ?? 22);
+    state.vps.port = Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 22;
+    const saved = readStoredObject(demoStorageKey());
+    if (Object.keys(saved).length) {
+        const { vps, dns, protocols } = workspaceForms.demo;
+        vps.ip = typeof saved.ip === 'string' ? saved.ip : '';
+        vps.runtime = saved.runtime === 'docker' ? 'docker' : 'native';
+        dns.domain = savedDomain(saved);
+        Object.keys(protocols).forEach(name => { protocols[name] = saved.protocols?.[name] === true; });
+        lastDemo = saved.last && typeof saved.last.ip === 'string' &&
+            ['success', 'failed', 'cancelled', 'interrupted'].includes(saved.last.status) &&
+            typeof saved.last.finishedAt === 'string' && Number.isFinite(Date.parse(saved.last.finishedAt)) ? {
+                ip: saved.last.ip, status: saved.last.status, finishedAt: saved.last.finishedAt
+            } : null;
     }
     workspaceForms.real = Object.fromEntries(formGroups.map(group => [group, state[group]]));
     Object.assign(state, workspaceForms.demo);
@@ -114,6 +151,7 @@ function switchMode(mode) {
     if (state.deploy.running || deployMode === mode) return;
     deployMode = mode;
     Object.assign(state, workspaceForms[mode]);
+    clearClientResults();
     initFormFromState();
     clearFormError();
     updateDeployControls();
@@ -123,7 +161,7 @@ function switchMode(mode) {
 function fillDemo() {
     Object.assign(state.vps, { ip: '203.0.113.10', user: 'demo', auth: 'password', password: 'mock', runtime: 'native' });
     Object.assign(state.protocols, { hysteria2: true, vless_reality: false, openflux: false });
-    Object.assign(state.dns, { root: 'example.test', sub: 'vpn', cfToken: 'mock' });
+    Object.assign(state.dns, { domain: 'vpn.example.test', cfToken: 'mock' });
     Object.assign(state.certs, {
         source: 'vps',
         vpsFullchainPath: '/demo/fullchain.pem',
@@ -155,11 +193,11 @@ async function api(path, { method = 'GET', body, form } = {}) {
     }
     const r = await fetch(path, opts);
     if (!r.ok) {
-        const error = await r.json();
+        const error = await r.json().catch(() => ({}));
         if (error.error?.code === 'auth_required') {
             window.location.assign('/login');
         }
-        throw new Error(error.error?.message || 'API request failed');
+        throw new Error(error.error?.message || `Ошибка запроса (${r.status}). Повторите попытку.`);
     }
     return r.status === 204 ? null : r.json();
 }
@@ -181,7 +219,7 @@ function toggleElement(id) {
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
+    toast.className = `toast show ${type}`;
     toast.textContent = message;
     container.appendChild(toast);
     
@@ -196,8 +234,8 @@ function clientToken(client) {
 }
 
 function subscriptionUrl(client) {
-    const host = state.protocols.hysteria2 && state.dns.root && state.dns.sub
-        ? `${state.dns.sub}.${state.dns.root}`
+    const host = state.protocols.hysteria2 && state.dns.domain.trim()
+        ? state.dns.domain.trim()
         : state.vps.ip;
     const scheme = state.protocols.hysteria2 ? 'https' : 'http';
     const port = state.protocols.hysteria2 ? 8444 : 8080;
@@ -262,13 +300,11 @@ function updateAuthFields() {
 }
 
 function updateCertificateFields() {
-    if (state.certs.source === 'vps') {
-        hideElement('certificate-upload-fields');
-        showElement('certificate-vps-fields');
-    } else {
-        showElement('certificate-upload-fields');
-        hideElement('certificate-vps-fields');
-    }
+    ['upload', 'vps', 'letsencrypt'].forEach(source => {
+        const id = `certificate-${source}-fields`;
+        if (state.certs.source === source) showElement(id);
+        else hideElement(id);
+    });
 }
 
 // OpenFlux transport fields
@@ -336,10 +372,9 @@ function renderClients() {
         copyBtn.className = 'icon-btn';
         copyBtn.innerHTML = '<i data-lucide="copy" class="w-4 h-4"></i>';
         copyBtn.title = 'Copy subscription URL';
-        copyBtn.onclick = (e) => {
+        copyBtn.onclick = async (e) => {
             e.stopPropagation();
-            copyToClipboard(subscriptionUrl(client));
-            showToast('Ссылка подписки скопирована.', 'success');
+            if (await copyToClipboard(subscriptionUrl(client))) showToast('Ссылка подписки скопирована.', 'success');
         };
         
         const renameBtn = document.createElement('button');
@@ -478,6 +513,8 @@ function deployStatusText(status, mode) {
         running: 'Выполняется',
         success: mode === 'demo' ? 'Симуляция завершена' : 'Сервер настроен',
         failed: 'Ошибка запуска',
+        reconnecting: 'Восстанавливаем связь с журналом',
+        interrupted: 'Статус запуска неизвестен',
         cancelled: 'Запуск отменён'
     }[status] || 'Статус неизвестен';
 }
@@ -495,6 +532,9 @@ function updateDeployControls() {
     const button = document.getElementById('forge-btn');
     document.getElementById('deploy-button-label').textContent = demo ? 'Запустить демо' : 'Развернуть на VPS';
     button.disabled = running;
+    document.querySelectorAll('[data-field], .file-select-btn, #validate-cert-btn').forEach(control => {
+        control.disabled = running;
+    });
     document.querySelectorAll('[data-deploy-mode]').forEach(control => {
         control.disabled = running;
         control.setAttribute('aria-pressed', String(control.dataset.deployMode === deployMode));
@@ -565,16 +605,39 @@ async function startDeployment() {
         showFormError('Выберите хотя бы один протокол.', 'proto-hysteria2');
         return;
     }
-    const domain = state.dns.root.trim() && state.dns.sub.trim()
-        ? `${state.dns.sub.trim()}.${state.dns.root.trim()}` : null;
+    if (!demo && (!Number.isInteger(Number(state.vps.port)) ||
+        Number(state.vps.port) < 1 || Number(state.vps.port) > 65535)) {
+        showFormError('Введите SSH-порт от 1 до 65535.', 'vps-port');
+        return;
+    }
+    if (!demo && !state.vps.user.trim()) {
+        showFormError('Укажите пользователя SSH.', 'vps-user');
+        return;
+    }
+    if (!demo && state.protocols.openflux && !state.openflux.transport) {
+        showFormError('Выберите транспорт OpenFlux.', 'transport-cups');
+        return;
+    }
+    const domain = state.dns.domain.trim() || null;
     if (!demo && state.protocols.hysteria2 && !domain) {
-        showFormError('Для Hysteria 2 укажите корневой домен и поддомен.', state.dns.root.trim() ? 'dns-sub' : 'dns-root');
+        showFormError('Для Hysteria 2 укажите полный домен, например vpn.example.com.', 'dns-domain');
         return;
     }
     if (!demo && state.protocols.hysteria2 && state.certs.source === 'vps' &&
         (!state.certs.vpsFullchainPath || !state.certs.vpsPrivkeyPath)) {
         showFormError('Укажите оба пути к сертификату на VPS.', state.certs.vpsFullchainPath ? 'cert-vps-privkey' : 'cert-vps-fullchain');
         return;
+    }
+    if (!demo && state.protocols.hysteria2 && state.certs.source === 'upload') {
+        for (const [id, message] of [
+            ['cert-file', 'Выберите файл сертификата fullchain.pem.'],
+            ['key-file', 'Выберите файл закрытого ключа privkey.pem.']
+        ]) {
+            if (!document.getElementById(id).files.length) {
+                showFormError(message, document.querySelector(`[data-target="${id}"]`).id);
+                return;
+            }
+        }
     }
 
     try {
@@ -591,7 +654,6 @@ async function startDeployment() {
             ssh_private_key_path: state.vps.auth === 'key' ? state.vps.keyPath : null,
             ssh_password: state.vps.auth === 'password' ? state.vps.password : null,
             domain: state.protocols.hysteria2 ? domain : null,
-            root_domain: state.dns.root || null,
             protocols: state.protocols,
             runtime: state.vps.runtime,
             certificate_source: state.certs.source,
@@ -655,6 +717,10 @@ async function startDeployment() {
 function connectToStream(jobId) {
     const eventSource = new EventSource(`/api/deploy/stream/${jobId}`);
 
+    eventSource.addEventListener('open', () => {
+        if (state.deploy.running && state.deploy.jobId === jobId) setDeployStatus('running');
+    });
+
     eventSource.addEventListener('log', event => {
         const line = JSON.parse(event.data).line;
         state.deploy.logs.push(line);
@@ -671,12 +737,18 @@ function connectToStream(jobId) {
     });
 
     eventSource.addEventListener('error', () => {
-        eventSource.close();
-        completeDeployment('failed', 'Связь с журналом прервалась.');
+        if (!state.deploy.running || state.deploy.jobId !== jobId) return;
+        if (eventSource.readyState === EventSource.CLOSED) {
+            eventSource.close();
+            completeDeployment('interrupted', 'Журнал недоступен. Сервер мог перезапуститься. Проверьте результат перед повторным запуском.');
+        } else {
+            setDeployStatus('reconnecting');
+        }
     });
 }
 
 function completeDeployment(status, error = '') {
+    if (!state.deploy.running) return;
     const { mode, ip, stages } = state.deploy;
     state.deploy.running = false;
     if (mode === 'real' && status === 'success') {
@@ -698,6 +770,16 @@ function completeDeployment(status, error = '') {
     addLogLine(summary, { success: 'success', failed: 'error', cancelled: 'warning' }[status]);
     setDeployStatus(status, error);
     updateDeployControls();
+}
+
+function clearClientResults() {
+    state.clients = [];
+    state.services = {};
+    state.selectedClientId = null;
+    hideElement('openflux-client-output');
+    renderClients();
+    renderServices();
+    updateSectionVisibility();
 }
 
 async function refreshRealClients(ip) {
@@ -878,10 +960,15 @@ async function deleteClient() {
 }
 
 // Utility functions
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).catch(err => {
+async function copyToClipboard(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch (err) {
         console.error('Failed to copy:', err);
-    });
+        showToast('Не удалось скопировать. Проверьте доступ к буферу обмена.', 'error');
+        return false;
+    }
 }
 
 // File input handling
@@ -908,13 +995,18 @@ function setupPasswordToggles() {
             const input = document.getElementById(targetId);
             if (input.type === 'password') {
                 input.type = 'text';
+                btn.setAttribute('aria-label', 'Скрыть пароль');
                 btn.innerHTML = '<i data-lucide="eye-off" class="w-4 h-4"></i>';
             } else {
                 input.type = 'password';
+                btn.setAttribute('aria-label', 'Показать пароль');
                 btn.innerHTML = '<i data-lucide="eye" class="w-4 h-4"></i>';
             }
             initIcons();
+            btn.setAttribute('aria-pressed', String(input.type === 'text'));
         });
+        btn.setAttribute('aria-label', 'Показать пароль');
+        btn.setAttribute('aria-pressed', 'false');
     });
 }
 
@@ -929,10 +1021,14 @@ function setupFormInputs() {
                 if (parts.length === 2) {
                     state[parts[0]][parts[1]] = e.target.value;
                 }
+                if (field === 'vps.ip') clearClientResults();
                 if (e.target.hasAttribute('aria-invalid')) clearFormError();
                 saveState();
             }
         });
+    });
+    document.getElementById('vps-ip').addEventListener('change', () => {
+        if (deployMode === 'real' && state.vps.ip.trim()) refreshRealClients(state.vps.ip.trim());
     });
     
     // Checkboxes (protocols)
@@ -1019,10 +1115,9 @@ function setupEventListeners() {
     
     document.getElementById('cancel-deploy-btn').addEventListener('click', cancelDeployment);
     
-    document.getElementById('copy-log-btn').addEventListener('click', () => {
+    document.getElementById('copy-log-btn').addEventListener('click', async () => {
         const logs = state.deploy.logs.join('\n');
-        copyToClipboard(logs);
-        showToast('Log copied to clipboard', 'success');
+        if (await copyToClipboard(logs)) showToast('Журнал скопирован.', 'success');
     });
     
     document.getElementById('download-log-btn').addEventListener('click', () => {
@@ -1052,11 +1147,10 @@ function setupEventListeners() {
     });
     
     // Copy config button
-    document.getElementById('copy-config-btn').addEventListener('click', () => {
+    document.getElementById('copy-config-btn').addEventListener('click', async () => {
         const client = state.clients.find(c => c.id === state.selectedClientId);
         if (!client) return;
-        copyToClipboard(subscriptionUrl(client));
-        showToast('Ссылка подписки скопирована.', 'success');
+        if (await copyToClipboard(subscriptionUrl(client))) showToast('Ссылка подписки скопирована.', 'success');
     });
 
     document.getElementById('download-xray-btn').addEventListener('click', () => {
@@ -1086,7 +1180,7 @@ function setupEventListeners() {
             const formData = new FormData();
             formData.append('fullchain', certInput.files[0]);
             formData.append('privkey', keyInput.files[0]);
-            formData.append('domain', state.dns.sub && state.dns.root ? `${state.dns.sub}.${state.dns.root}` : null);
+            if (state.dns.domain.trim()) formData.append('domain', state.dns.domain.trim());
             
             const certInfo = await api('/api/cert/validate', { method: 'POST', form: formData });
             state.certs.info = certInfo;
@@ -1141,8 +1235,7 @@ function initFormFromState() {
     
     // DNS
     document.getElementById('dns-cftoken').value = state.dns.cfToken;
-    document.getElementById('dns-root').value = state.dns.root;
-    document.getElementById('dns-sub').value = state.dns.sub;
+    document.getElementById('dns-domain').value = state.dns.domain;
     document.querySelector(`input[name="certificate-source"][value="${state.certs.source}"]`).checked = true;
     document.getElementById('cert-vps-fullchain').value = state.certs.vpsFullchainPath;
     document.getElementById('cert-vps-privkey').value = state.certs.vpsPrivkeyPath;

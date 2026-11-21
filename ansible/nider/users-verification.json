@@ -1,0 +1,26 @@
+[
+  {
+    "case": "legacy",
+    "passed": true,
+    "connected": true,
+    "exit_ip": "103.118.208.229"
+  },
+  {
+    "case": "juuul",
+    "passed": true,
+    "connected": true,
+    "exit_ip": "103.118.208.229"
+  },
+  {
+    "case": "wrong-auth",
+    "passed": true,
+    "connected": false,
+    "exit_ip": null
+  },
+  {
+    "case": "wrong-name",
+    "passed": true,
+    "connected": false,
+    "exit_ip": null
+  }
+]

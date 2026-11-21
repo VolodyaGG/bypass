@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+import re
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -230,7 +232,26 @@ class VPSConnection(BaseModel):
 
 
 RuntimeKind = Literal["native", "docker"]
-CertificateSource = Literal["upload", "vps"]
+CertificateSource = Literal["upload", "vps", "letsencrypt"]
+
+
+def normalize_acme_domain(value: str) -> str:
+    """Accept a single DNS hostname, safe for a dedicated Certbot lineage."""
+    try:
+        domain = value.strip().rstrip(".").encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise ValueError("Укажите корректный домен для Let's Encrypt.") from exc
+    labels = domain.split(".")
+    if len(domain) > 253 or len(labels) < 2 or any(
+        not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+        for label in labels
+    ):
+        raise ValueError("Укажите домен без протокола, порта, пути и wildcard.")
+    try:
+        ipaddress.ip_address(domain)
+    except ValueError:
+        return domain
+    raise ValueError("Для автоматического выпуска укажите домен, а не IP-адрес.")
 
 
 class ErrorBody(BaseModel):
@@ -288,7 +309,7 @@ class DeployRequest(BaseModel):
 
     ip: str
     ssh_user: str = "root"
-    ssh_port: int = 22
+    ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_private_key_path: str | None = None
     ssh_password: str | None = None
     domain: str | None = None
@@ -301,6 +322,14 @@ class DeployRequest(BaseModel):
     openflux: OpenFluxConfig | None = None
     routing: ClientRoutingConfig = Field(default_factory=ClientRoutingConfig)
     cf_api_token: str | None = None
+
+    @field_validator("ip")
+    @classmethod
+    def _target_not_empty(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Введите адрес сервера.")
+        return value
 
     @field_validator("protocols")
     @classmethod

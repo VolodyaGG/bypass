@@ -1,4 +1,8 @@
 ---
+- name: Automatic Let's Encrypt certificate
+  ansible.builtin.import_tasks: acme.yml
+  when: hysteria2.certificate_source == "letsencrypt"
+
 - name: Write TLS fullchain
   when: hysteria2.certificate_source == "upload"
   ansible.builtin.copy:
@@ -8,6 +12,10 @@
     group: root
     mode: "0644"
   no_log: true
+  notify:
+    - restart hysteria
+    - restart sub
+    - restart compose
 
 - name: Write TLS private key
   when: hysteria2.certificate_source == "upload"
@@ -18,6 +26,10 @@
     group: root
     mode: "0600"
   no_log: true
+  notify:
+    - restart hysteria
+    - restart sub
+    - restart compose
 
 - name: Validate existing certificate on VPS
   when: hysteria2.certificate_source == "vps"
@@ -83,6 +95,10 @@
         owner: root
         group: root
         mode: "0644"
+      notify:
+        - restart hysteria
+        - restart sub
+        - restart compose
 
     - name: Copy existing TLS private key into bypass
       ansible.builtin.copy:
@@ -93,6 +109,10 @@
         group: root
         mode: "0600"
       no_log: true
+      notify:
+        - restart hysteria
+        - restart sub
+        - restart compose
 
 - name: Write Hysteria config
   ansible.builtin.copy:

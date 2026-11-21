@@ -14,16 +14,19 @@
         state: restarted
 
     - name: reload hysteria
+      when: vpnforge.runtime == "native"
       ansible.builtin.systemd:
         name: vpnforge-hysteria
         state: reloaded
 
     - name: restart hysteria
+      when: vpnforge.runtime == "native"
       ansible.builtin.systemd:
         name: vpnforge-hysteria
         state: restarted
 
     - name: restart sub
+      when: vpnforge.runtime == "native"
       ansible.builtin.systemd:
         name: vpnforge-sub
         state: restarted
@@ -42,6 +45,14 @@
   tasks:
     - name: Base system
       ansible.builtin.import_tasks: tasks/base.yml
+
+    - name: Disable bypass renewal hook when automatic TLS is not selected
+      ansible.builtin.file:
+        path: /etc/vpnforge/acme.json
+        state: absent
+      when: >-
+        not (protocols.hysteria2 | default(false)) or
+        hysteria2.certificate_source | default('upload') != 'letsencrypt'
 
     - name: Native runtime
       ansible.builtin.import_tasks: tasks/native.yml

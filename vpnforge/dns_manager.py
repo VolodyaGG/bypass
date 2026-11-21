@@ -124,6 +124,16 @@ class CloudflareDNS:
                     return zone_id
         raise CFZoneNotFound(f"zone not found for {root_domain!r}")
 
+    def resolve_zone_for_hostname(self, hostname: str) -> str:
+        """Find the closest accessible zone without guessing public suffixes."""
+        labels = hostname.strip().lower().rstrip(".").split(".")
+        for index in range(len(labels) - 1):
+            try:
+                return self.resolve_zone_id(".".join(labels[index:]))
+            except CFZoneNotFound:
+                continue
+        raise CFZoneNotFound(f"zone not found for {hostname!r}")
+
     def upsert_a_record(
         self,
         zone_id: str,

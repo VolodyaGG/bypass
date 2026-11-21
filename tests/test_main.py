@@ -64,6 +64,9 @@ class FakeCF:
     def resolve_zone_id(self, root_domain: str) -> str:
         return "zone-1"
 
+    def resolve_zone_for_hostname(self, hostname: str) -> str:
+        return "zone-1"
+
     def upsert_a_record(
         self,
         zone_id: str,
@@ -582,6 +585,52 @@ async def test_deploy_hysteria_with_existing_vps_certs(client_app: Any) -> None:
     assert job.status == "success"
 
 
+async def test_deploy_hysteria_automatic_tls_without_files(
+    client_app: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+
+    ac, app, runner = client_app
+    captured: dict[str, Any] = {}
+    original_run = runner.run
+
+    async def capture_inventory(playbook: Path, inventory: Path) -> FakeAnsibleRun:
+        captured.update(yaml.safe_load((inventory.parent / "group_vars/all.yml").read_text()))
+        return await original_run(playbook, inventory)
+
+    monkeypatch.setattr(runner, "run", capture_inventory)
+    response = await ac.post("/api/deploy", data={"payload": json.dumps({
+        "ip": "1.2.3.4", "domain": "Node1.Example.Com.",
+        "certificate_source": "letsencrypt", "protocols": {"hysteria2": True},
+    })})
+    assert response.status_code == 202, response.text
+    job = await _wait_job(app, response.json()["job_id"])
+    assert job.status == "success", job.error
+    assert captured["hysteria2"]["certificate_source"] == "letsencrypt"
+    assert captured["hysteria2"]["acme_domain"] == "node1.example.com"
+    assert captured["hysteria2"]["fullchain_b64"] is None
+    saved = app.state.ctx.store.load("1.2.3.4")
+    assert saved.domain == "node1.example.com"
+    assert saved.cert.sha256 is None
+
+
+@pytest.mark.parametrize("domain", [
+    None, "localhost", "*.example.com", "1.2.3.4", "https://example.com", "-d.evil.com",
+    "example.com/path", "example.com:80", "../example.com", "example.com\n--help",
+])
+async def test_auto_certificate_invalid_domain_does_not_start_deploy(
+    client_app: Any, domain: str | None
+) -> None:
+    ac, app, runner = client_app
+    response = await ac.post("/api/deploy", data={"payload": json.dumps({
+        "ip": "1.2.3.4", "domain": domain,
+        "certificate_source": "letsencrypt", "protocols": {"hysteria2": True},
+    })})
+    assert response.status_code == 422
+    assert not runner.calls
+    assert not app.state.ctx.jobs
+
+
 @pytest.mark.parametrize(
     ("fullchain_path", "privkey_path"),
     [
@@ -695,6 +744,157 @@ def test_deploy_job_serializes_log_events_for_frontend() -> None:
     job = DeployJob(job_id="job-1")
     job.emit("log", "проверка подключения")
     assert json.loads(job.history[0]["data"]) == {"line": "проверка подключения"}
+
+
+def test_deploy_job_has_one_terminal_event_and_releases_subscribers() -> None:
+    job = DeployJob(job_id="job-1")
+    queue = job.subscribe()
+    job.emit("log", "first")
+    job.finish("success")
+    job.finish("cancelled")
+    assert job.status == "success"
+    assert [item["event"] for item in job.history] == ["log", "done"]
+    assert [item["id"] for item in job.history] == ["1", "2"]
+    job.unsubscribe(queue)
+    assert not job._queues
+
+
+async def test_stream_reconnect_resumes_after_last_event(client_app: Any) -> None:
+    ac, app, _ = client_app
+    job = DeployJob(job_id="reconnect")
+    app.state.ctx.jobs[job.job_id] = job
+    job.emit("log", "already received")
+    job.emit("log", "new line")
+    job.finish("success")
+    response = await ac.get(
+        "/api/deploy/stream/reconnect", headers={"Last-Event-ID": "1"}
+    )
+    assert response.status_code == 200
+    assert "already received" not in response.text
+    assert "new line" in response.text
+    assert "id: 2" in response.text
+    assert '"status": "success"' in response.text
+    assert not job._queues
+
+
+@pytest.mark.parametrize("cursor", ["bad", "-1", "999"])
+async def test_stream_rejects_invalid_cursor(client_app: Any, cursor: str) -> None:
+    ac, app, _ = client_app
+    app.state.ctx.jobs["cursor"] = DeployJob(job_id="cursor")
+    response = await ac.get(
+        "/api/deploy/stream/cursor", headers={"Last-Event-ID": cursor}
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("endpoint", ["/api/deploy", "/api/deploy/demo"])
+async def test_empty_target_does_not_create_job(client_app: Any, endpoint: str) -> None:
+    ac, app, _ = client_app
+    response = await ac.post(endpoint, data={"payload": json.dumps({
+        "ip": "  ", "protocols": {"vless_reality": True}
+    })})
+    assert response.status_code == 422
+    assert not app.state.ctx.jobs
+
+
+@pytest.mark.parametrize("port", [0, 65536])
+async def test_invalid_ssh_port_does_not_create_job(client_app: Any, port: int) -> None:
+    ac, app, _ = client_app
+    response = await ac.post("/api/deploy", data={"payload": json.dumps({
+        "ip": "203.0.113.10", "ssh_port": port, "protocols": {"vless_reality": True}
+    })})
+    assert response.status_code == 422
+    assert not app.state.ctx.jobs
+
+
+@pytest.mark.parametrize("returncode,timed_out,status", [
+    (0, False, "success"), (1, False, "failed"), (0, True, "failed")
+])
+async def test_demo_result_and_retry(
+    client_app: Any, monkeypatch: pytest.MonkeyPatch,
+    returncode: int, timed_out: bool, status: str,
+) -> None:
+    ac, app, runner = client_app
+    directories: list[Path] = []
+
+    class DemoRun(FakeAnsibleRun):
+        async def aclose(self) -> None:
+            pass
+
+    async def fake_demo(_bin: str, directory: Path, req: Any, _timeout: int) -> DemoRun:
+        directories.append(directory)
+        assert req.ip == "203.0.113.10"
+        return DemoRun(lines=["demo log"], returncode=returncode, timed_out=timed_out)
+
+    monkeypatch.setattr("vpnforge.main.shutil.which", lambda _: "/fake/molecule")
+    monkeypatch.setattr("vpnforge.main.demo_deploy.run", fake_demo)
+    payload = json.dumps({"ip": " 203.0.113.10 ", "protocols": {"hysteria2": True}})
+    job_ids = []
+    for _ in range(2):
+        response = await ac.post("/api/deploy/demo", data={"payload": payload})
+        assert response.status_code == 202
+        job_id = response.json()["job_id"]
+        job_ids.append(job_id)
+        job = await _wait_job(app, job_id)
+        assert job.status == status
+        stream = await ac.get(f"/api/deploy/stream/{job_id}")
+        assert "demo log" in stream.text
+        assert f'"status": "{status}"' in stream.text
+        assert not job._queues
+    assert len(set(job_ids)) == 2
+    assert not runner.calls
+    assert not app.state.ctx.store.list_ips()
+    assert all(not directory.exists() for directory in directories)
+
+
+async def test_demo_missing_molecule_does_not_create_job(
+    client_app: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ac, app, _ = client_app
+    monkeypatch.setattr("vpnforge.main.shutil.which", lambda _: None)
+    response = await ac.post("/api/deploy/demo", data={"payload": json.dumps({
+        "ip": "203.0.113.10", "protocols": {"hysteria2": True}
+    })})
+    assert response.status_code == 503
+    assert not app.state.ctx.jobs
+
+
+async def test_cancel_demo_keeps_log_and_cleans_work_directory(
+    client_app: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ac, app, _ = client_app
+    started = asyncio.Event()
+    closed = asyncio.Event()
+    directories: list[Path] = []
+
+    class WaitingRun(FakeAnsibleRun):
+        async def __aiter__(self):  # type: ignore[no-untyped-def]
+            yield "waiting demo"
+            started.set()
+            await asyncio.Event().wait()
+
+        async def aclose(self) -> None:
+            closed.set()
+
+    async def fake_demo(_bin: str, directory: Path, _req: Any, _timeout: int) -> WaitingRun:
+        directories.append(directory)
+        return WaitingRun()
+
+    monkeypatch.setattr("vpnforge.main.shutil.which", lambda _: "/fake/molecule")
+    monkeypatch.setattr("vpnforge.main.demo_deploy.run", fake_demo)
+    response = await ac.post("/api/deploy/demo", data={"payload": json.dumps({
+        "ip": "203.0.113.10", "protocols": {"hysteria2": True}
+    })})
+    job_id = response.json()["job_id"]
+    await asyncio.wait_for(started.wait(), 2)
+    for _ in range(2):
+        cancelled = await ac.post(f"/api/deploy/cancel/{job_id}")
+        assert cancelled.json() == {"status": "cancelled"}
+    assert closed.is_set()
+    assert all(not directory.exists() for directory in directories)
+    stream = await ac.get(f"/api/deploy/stream/{job_id}")
+    assert "waiting demo" in stream.text
+    assert stream.text.count("event: done") == 1
 
 
 async def test_deploy_invalid_payload(client_app: Any) -> None:

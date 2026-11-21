@@ -1,0 +1,214 @@
+---
+- name: Deploy only Hysteria 2 to the verified nider server
+  hosts: hysteria
+  become: true
+  gather_facts: true
+  vars_files:
+    - secrets.yml
+  vars:
+    hy_domain: yaposo.su
+    hy_version: 2.13.0
+    hy_checksum: sha256:907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691
+  handlers:
+    - name: Restart isolated Hysteria
+      ansible.builtin.systemd_service:
+        name: hysteria2-nider
+        daemon_reload: true
+        state: restarted
+  pre_tasks:
+    - name: Require expected host and architecture
+      ansible.builtin.assert:
+        that:
+          - ansible_host == '103.118.208.229'
+          - ansible_facts.architecture == 'x86_64'
+          - ansible_facts.service_mgr == 'systemd'
+          - hy_auth | length >= 32
+          - hy_obfs | length >= 32
+      no_log: true
+    - name: Read UDP port 24443 ownership
+      ansible.builtin.command: ss -H -lunp sport = :24443
+      register: udp_port
+      changed_when: false
+    - name: Read our service main PID
+      ansible.builtin.command: systemctl show hysteria2-nider.service -p MainPID --value
+      register: our_pid
+      changed_when: false
+      failed_when: false
+    - name: Refuse to share a UDP port with another service
+      ansible.builtin.assert:
+        that:
+          - udp_port.stdout | length == 0 or (our_pid.stdout | int > 0 and ('pid=' ~ our_pid.stdout ~ ',') in udp_port.stdout)
+        fail_msg: UDP 24443 is occupied by another service; no changes made.
+  tasks:
+    - name: Create dedicated service group
+      ansible.builtin.group:
+        name: hysteria-nider
+        system: true
+    - name: Create dedicated service account
+      ansible.builtin.user:
+        name: hysteria-nider
+        group: hysteria-nider
+        system: true
+        create_home: false
+        home: /nonexistent
+        shell: /usr/sbin/nologin
+    - name: Create isolated binary directory
+      ansible.builtin.file:
+        path: /usr/local/lib/hysteria2-nider
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Create isolated configuration directory
+      ansible.builtin.file:
+        path: /etc/hysteria2-nider
+        state: directory
+        owner: root
+        group: hysteria-nider
+        mode: '0750'
+    - name: Download pinned official release with SHA256 verification
+      ansible.builtin.get_url:
+        url: 'https://github.com/HyNetworks/hysteria/releases/download/app/v{{ hy_version }}/hysteria-linux-amd64'
+        dest: /usr/local/lib/hysteria2-nider/hysteria
+        checksum: '{{ hy_checksum }}'
+        owner: root
+        group: root
+        mode: '0755'
+      notify: Restart isolated Hysteria
+    - name: Validate public certificate on ger before transfer
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - verify
+          - -purpose
+          - sslserver
+          - -verify_hostname
+          - '{{ hy_domain }}'
+          - -untrusted
+          - /etc/letsencrypt/live/yaposo.su/fullchain.pem
+          - /etc/letsencrypt/live/yaposo.su/cert.pem
+      delegate_to: ger
+      changed_when: false
+    - name: Require at least seven days of certificate validity
+      ansible.builtin.command: openssl x509 -in /etc/letsencrypt/live/yaposo.su/fullchain.pem -noout -checkend 604800
+      delegate_to: ger
+      changed_when: false
+    - name: Read public part of certificate key on ger
+      ansible.builtin.command: openssl x509 -in /etc/letsencrypt/live/yaposo.su/fullchain.pem -pubkey -noout
+      delegate_to: ger
+      changed_when: false
+      register: source_cert_pubkey
+    - name: Read public part of private key on ger
+      ansible.builtin.command: openssl pkey -in /etc/letsencrypt/live/yaposo.su/privkey.pem -pubout
+      delegate_to: ger
+      changed_when: false
+      register: source_key_pubkey
+    - name: Require certificate and private key to match
+      ansible.builtin.assert:
+        that: source_cert_pubkey.stdout == source_key_pubkey.stdout
+    - name: Read fullchain through SSH without persistent local files
+      ansible.builtin.slurp:
+        src: /etc/letsencrypt/live/yaposo.su/fullchain.pem
+      delegate_to: ger
+      register: source_fullchain
+      no_log: true
+    - name: Read private key through SSH without persistent local files
+      ansible.builtin.slurp:
+        src: /etc/letsencrypt/live/yaposo.su/privkey.pem
+      delegate_to: ger
+      register: source_private_key
+      no_log: true
+    - name: Install trusted fullchain and matching key with backups
+      ansible.builtin.copy:
+        content: '{{ item.content | b64decode }}'
+        dest: '/etc/hysteria2-nider/{{ item.name }}'
+        owner: root
+        group: hysteria-nider
+        mode: '0640'
+        backup: true
+      loop:
+        - name: server.crt
+          content: '{{ source_fullchain.content }}'
+        - name: server.key
+          content: '{{ source_private_key.content }}'
+      no_log: true
+      notify: Restart isolated Hysteria
+    - name: Set certificate permissions
+      ansible.builtin.file:
+        path: '/etc/hysteria2-nider/{{ item }}'
+        owner: root
+        group: hysteria-nider
+        mode: '0640'
+      loop:
+        - server.key
+        - server.crt
+    - name: Install authentication records and command
+      ansible.builtin.import_tasks: tasks/auth.yml
+    - name: Write isolated server configuration
+      ansible.builtin.template:
+        src: server.yaml.j2
+        dest: /etc/hysteria2-nider/server.yaml
+        owner: root
+        group: hysteria-nider
+        mode: '0640'
+      no_log: true
+      notify: Restart isolated Hysteria
+    - name: Install isolated systemd service
+      ansible.builtin.template:
+        src: hysteria2-nider.service.j2
+        dest: /etc/systemd/system/hysteria2-nider.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart isolated Hysteria
+    - name: Apply service updates
+      ansible.builtin.meta: flush_handlers
+    - name: Enable and start Hysteria
+      ansible.builtin.systemd_service:
+        name: hysteria2-nider
+        daemon_reload: true
+        enabled: true
+        state: started
+    - name: Verify service remains active
+      ansible.builtin.command: systemctl is-active hysteria2-nider
+      changed_when: false
+      register: service_active
+      until: service_active.stdout == 'active'
+      retries: 5
+      delay: 2
+    - name: Fetch public certificate for trusted client connections
+      ansible.builtin.fetch:
+        src: /etc/hysteria2-nider/server.crt
+        dest: '{{ playbook_dir }}/server.crt'
+        flat: true
+    - name: Read certificate fingerprint
+      ansible.builtin.command: openssl x509 -in /etc/hysteria2-nider/server.crt -noout -fingerprint -sha256
+      register: cert_fingerprint
+      changed_when: false
+    - name: Save native client configuration
+      ansible.builtin.copy:
+        dest: '{{ playbook_dir }}/client.yaml'
+        mode: '0600'
+        content: |
+          server: 103.118.208.229:24443
+          auth: {{ hy_auth | to_json }}
+          tls:
+            sni: {{ hy_domain }}
+            insecure: false
+          obfs:
+            type: salamander
+            salamander:
+              password: {{ hy_obfs | to_json }}
+          socks5:
+            listen: 127.0.0.1:10808
+      delegate_to: localhost
+      become: false
+      no_log: true
+    - name: Save import URI with public CA verification
+      ansible.builtin.copy:
+        dest: '{{ playbook_dir }}/import-uri.txt'
+        mode: '0600'
+        content: "hysteria2://{{ hy_auth }}@103.118.208.229:24443/?sni={{ hy_domain }}&insecure=0&obfs=salamander&obfs-password={{ hy_obfs }}#nider\n"
+      delegate_to: localhost
+      become: false
+      no_log: true

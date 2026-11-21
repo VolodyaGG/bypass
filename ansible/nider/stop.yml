@@ -1,0 +1,11 @@
+---
+- name: Stop only the isolated nider Hysteria service
+  hosts: hysteria
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Disable and stop Hysteria without touching other services or files
+      ansible.builtin.systemd_service:
+        name: hysteria2-nider
+        state: stopped
+        enabled: false

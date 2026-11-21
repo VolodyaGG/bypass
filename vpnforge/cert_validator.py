@@ -1,6 +1,6 @@
 """X.509 certificate validation for user-supplied fullchain + privkey.
 
-We do NOT issue certificates — user uploads LE-issued files. We only:
+Automatic issuance is handled by Ansible/Certbot. This module validates uploads:
   * parse them,
   * check the key matches the cert,
   * check the requested domain is covered by CN/SAN,

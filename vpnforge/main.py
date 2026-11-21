@@ -14,7 +14,17 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
@@ -62,6 +72,7 @@ from vpnforge.models import (
     Secrets,
     SecretsIpRequest,
     VPSConnection,
+    normalize_acme_domain,
 )
 from vpnforge.openflux_manager import OpenFluxError, build_client_command, parse_session_b64
 from vpnforge.secrets_store import SecretsError, SecretsInvalid, SecretsNotFound, SecretsStore
@@ -105,12 +116,14 @@ class DeployJob:
 
     def emit(self, event: str, data: str) -> None:
         payload = json.dumps({"line": data}, ensure_ascii=False) if event == "log" else data
-        item = {"event": event, "data": payload}
+        item = {"id": str(len(self.history) + 1), "event": event, "data": payload}
         self.history.append(item)
         for q in list(self._queues):
             q.put_nowait(item)
 
     def finish(self, status: str, error: str | None = None) -> None:
+        if self.done.is_set():
+            return
         self.status = status
         self.error = error
         self.emit("done", json.dumps({"status": status, "error": error}))
@@ -118,15 +131,19 @@ class DeployJob:
         for q in list(self._queues):
             q.put_nowait(None)
 
-    def subscribe(self) -> asyncio.Queue[dict[str, str] | None]:
+    def subscribe(self, after_id: int = 0) -> asyncio.Queue[dict[str, str] | None]:
         q: asyncio.Queue[dict[str, str] | None] = asyncio.Queue()
-        for item in self.history:
+        for item in self.history[after_id:]:
             q.put_nowait(item)
         if self.done.is_set():
             q.put_nowait(None)
         else:
             self._queues.append(q)
         return q
+
+    def unsubscribe(self, queue: asyncio.Queue[dict[str, str] | None]) -> None:
+        if queue in self._queues:
+            self._queues.remove(queue)
 
 
 # ---------- app factory ----------
@@ -373,8 +390,10 @@ def create_app(
             raise ApiError("cf_auth", "Cloudflare API token is empty", 401)
         cf = ctx.cf_factory(token)
         fqdn = body.fqdn.strip().lower().rstrip(".")
-        root = body.root_domain or _root_domain_from_fqdn(fqdn)
-        zone_id = body.zone_id or cf.resolve_zone_id(root)
+        zone_id = body.zone_id or (
+            cf.resolve_zone_id(body.root_domain)
+            if body.root_domain else cf.resolve_zone_for_hostname(fqdn)
+        )
         record_id = cf.upsert_a_record(zone_id, fqdn, body.ip)
         return {"zone_id": zone_id, "record_id": record_id}
 
@@ -451,6 +470,11 @@ def create_app(
         if req.protocols.hysteria2:
             if not req.domain:
                 raise ApiError("validation_error", "hysteria2 requires domain", 422)
+            if req.certificate_source == "letsencrypt":
+                try:
+                    req.domain = normalize_acme_domain(req.domain)
+                except ValueError as exc:
+                    raise ApiError("validation_error", str(exc), 422) from exc
             if req.certificate_source == "upload" and (not fc_bytes or not pk_bytes):
                 raise ApiError(
                     "validation_error",
@@ -486,18 +510,28 @@ def create_app(
         )
 
     @private.get("/api/deploy/stream/{job_id}")
-    async def deploy_stream(job_id: str) -> EventSourceResponse:
+    async def deploy_stream(job_id: str, request: Request) -> EventSourceResponse:
         job = ctx.jobs.get(job_id)
         if job is None:
             raise ApiError("job_not_found", f"job {job_id} not found", 404)
 
+        try:
+            after_id = int(request.headers.get("last-event-id", "0"))
+        except ValueError as exc:
+            raise ApiError("validation_error", "Invalid Last-Event-ID", 422) from exc
+        if not 0 <= after_id <= len(job.history):
+            raise ApiError("validation_error", "Invalid Last-Event-ID", 422)
+
         async def events() -> AsyncIterator[dict[str, str]]:
-            queue = job.subscribe()
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield item
+            queue = job.subscribe(after_id)
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    yield item
+            finally:
+                job.unsubscribe(queue)
 
         return EventSourceResponse(events())
 
@@ -699,19 +733,25 @@ async def _run_deploy(
                     fullchain, privkey, req.domain
                 )
             else:
-                job.emit("log", "certificate will be validated on VPS")
+                if req.certificate_source == "letsencrypt":
+                    job.emit("log", "Let's Encrypt: автоматический выпуск и продление на VPS")
+                else:
+                    job.emit("log", "certificate will be validated on VPS")
 
             token = req.cf_api_token or ctx.settings.cf_api_token
             if token:
                 job.emit("log", "upserting Cloudflare A record")
                 cf = ctx.cf_factory(token)
-                root = req.root_domain or _root_domain_from_fqdn(req.domain)
                 secrets_preview = (
                     ctx.store.load(req.ip) if ctx.store.exists(req.ip) else None
                 )
                 zone_id = (
-                    secrets_preview.cloudflare.zone_id if secrets_preview else None
-                ) or cf.resolve_zone_id(root)
+                    secrets_preview.cloudflare.zone_id
+                    if secrets_preview and secrets_preview.domain == req.domain else None
+                ) or (
+                    cf.resolve_zone_id(req.root_domain)
+                    if req.root_domain else cf.resolve_zone_for_hostname(req.domain)
+                )
                 record_id = cf.upsert_a_record(zone_id, req.domain, req.ip)
                 pending_cf = (zone_id, record_id)
             else:
@@ -729,7 +769,7 @@ async def _run_deploy(
 
         _ensure_protocol_secrets(secrets, req)
         _apply_cert_state(secrets, cert_info)
-        if req.protocols.hysteria2 and req.certificate_source == "vps":
+        if req.protocols.hysteria2 and req.certificate_source in {"vps", "letsencrypt"}:
             secrets.cert = CertState()
         if pending_cf is not None:
             secrets.cloudflare.zone_id, secrets.cloudflare.record_id = pending_cf

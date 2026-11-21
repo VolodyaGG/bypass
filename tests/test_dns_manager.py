@@ -136,6 +136,34 @@ def test_resolve_zone_id_empty(cf: CloudflareDNS) -> None:
 
 
 @responses.activate
+def test_resolve_zone_for_full_hostname_with_multilevel_suffix(cf: CloudflareDNS) -> None:
+    for name in ["vpn.eu.example.co.uk", "eu.example.co.uk", "example.co.uk"]:
+        responses.add(
+            responses.GET, f"{CF_API_BASE}/zones",
+            match=[responses.matchers.query_param_matcher({"name": name, "per_page": "50"})],
+            json=_cf_ok([{"id": ZONE_ID, "name": name}] if name == "example.co.uk" else []),
+            status=200,
+        )
+    assert cf.resolve_zone_for_hostname("VPN.EU.Example.Co.Uk.") == ZONE_ID
+    assert len(responses.calls) == 3
+
+
+@responses.activate
+def test_zone_discovery_propagates_auth_errors(cf: CloudflareDNS) -> None:
+    responses.add(responses.GET, f"{CF_API_BASE}/zones", status=403)
+    with pytest.raises(CFAuthError):
+        cf.resolve_zone_for_hostname(FQDN)
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_zone_discovery_missing_zone(cf: CloudflareDNS) -> None:
+    responses.add(responses.GET, f"{CF_API_BASE}/zones", json=_cf_ok([]), status=200)
+    with pytest.raises(CFZoneNotFound):
+        cf.resolve_zone_for_hostname(FQDN)
+
+
+@responses.activate
 def test_upsert_creates_when_missing(cf: CloudflareDNS) -> None:
     responses.add(
         responses.GET,

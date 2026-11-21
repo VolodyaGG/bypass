@@ -21,6 +21,16 @@ python-multipart = "^0.0.12"
 sse-starlette = "^2.1"
 aiofiles = "^24.1"
 
+[tool.poetry.group.demo]
+optional = true
+
+[tool.poetry.group.demo.dependencies]
+molecule = "26.4.0"
+ansible-core = [
+    { version = "2.19.4", python = ">=3.11,<3.12" },
+    { version = "2.20.4", python = ">=3.12" },
+]
+
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3"
 pytest-asyncio = "^0.24"

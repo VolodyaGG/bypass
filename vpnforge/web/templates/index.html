@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>bypass v0.1.0</title>
     <link rel="stylesheet" href="/static/vendor/bootstrap.min.css">
-    <link rel="stylesheet" href="/static/style.css?v=2">
-    <link rel="stylesheet" href="/static/workspace.css?v=7">
+    <link rel="stylesheet" href="/static/style.css?v=3">
+    <link rel="stylesheet" href="/static/workspace.css?v=9">
     <link rel="icon" href="/static/favicon.svg?v=3" type="image/svg+xml">
 </head>
 <body class="bg-base text-text antialiased">
@@ -182,8 +182,8 @@
                         <summary class="panel-header">DNS и сертификаты</summary>
                         <div class="panel-content space-y-4">
                             <div class="hint-card">
-                                Домен нужен для Hysteria 2. Сертификат должен быть выпущен именно на
-                                <strong>поддомен + корневой домен</strong>, например node1.example.com.
+                                Для Hysteria 2 нужен отдельный поддомен, направленный на VPS,
+                                например <strong>vpn.example.com</strong>. Введите его целиком, без https:// и порта.
                             </div>
                             <div class="input-group">
                                 <label class="input-label" for="dns-cftoken">CF Token</label>
@@ -197,24 +197,23 @@
                                 <span class="field-help">Необязательно. Оставьте пустым, если DNS-запись поддомена уже указывает на VPS.</span>
                             </div>
                             <div class="input-group">
-                                <label class="input-label" for="dns-root">Root</label>
+                                <label class="input-label" for="dns-domain">Полный домен</label>
                                 <div class="input-wrapper">
                                     <span class="input-prefix">></span>
-                                    <input type="text" id="dns-root" data-field="dns.root" placeholder="example.com" class="input-field">
+                                    <input type="text" id="dns-domain" data-field="dns.domain" placeholder="vpn.example.com" class="input-field" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="dns-domain-help">
                                 </div>
-                            </div>
-                            <div class="input-group">
-                                <label class="input-label" for="dns-sub">Sub</label>
-                                <div class="input-wrapper">
-                                    <span class="input-prefix">></span>
-                                    <input type="text" id="dns-sub" data-field="dns.sub" placeholder="node1" class="input-field">
-                                </div>
+                                <span id="dns-domain-help" class="field-help">Нужен поддомен вашего домена. Его DNS-запись должна указывать на IP этого VPS.</span>
                             </div>
                             <div class="input-group">
                                 <label class="input-label">Source</label>
                                 <div class="radio-group-inline">
                                     <label class="radio-group">
-                                        <input type="radio" name="certificate-source" value="upload" data-field="certs.source" checked>
+                                        <input type="radio" name="certificate-source" value="letsencrypt" data-field="certs.source" checked>
+                                        <span class="radio-indicator"></span>
+                                        <span class="radio-label">выпустить автоматически</span>
+                                    </label>
+                                    <label class="radio-group">
+                                        <input type="radio" name="certificate-source" value="upload" data-field="certs.source">
                                         <span class="radio-indicator"></span>
                                         <span class="radio-label">с этого компьютера</span>
                                     </label>
@@ -225,11 +224,17 @@
                                     </label>
                                 </div>
                             </div>
-                            <div id="certificate-upload-fields" class="space-y-4">
+                            <div id="certificate-letsencrypt-fields" class="hint-card success-hint">
+                                bypass выпустит бесплатный сертификат Let's Encrypt на VPS и настроит автопродление.
+                                Домен должен указывать на этот сервер, входящий TCP-порт 80 должен быть открыт.
+                                Файлы сертификата загружать не нужно. В демо выпуск не выполняется.
+                                <a href="https://letsencrypt.org/repository/" target="_blank" rel="noopener noreferrer">Условия Let's Encrypt</a>
+                            </div>
+                            <div id="certificate-upload-fields" class="space-y-4 hidden">
                                 <div class="input-group">
                                     <label class="input-label">Cert</label>
                                     <div class="file-input-wrapper">
-                                        <button type="button" class="file-select-btn" data-target="cert-file">[ select fullchain.pem ]</button>
+                                        <button type="button" id="select-cert-file" class="file-select-btn" data-target="cert-file">Выбрать fullchain.pem</button>
                                         <input type="file" id="cert-file" accept=".pem,.crt" class="hidden">
                                         <span id="cert-status" class="file-status"></span>
                                     </div>
@@ -237,7 +242,7 @@
                                 <div class="input-group">
                                     <label class="input-label">Key</label>
                                     <div class="file-input-wrapper">
-                                        <button type="button" class="file-select-btn" data-target="key-file">[ select privkey.pem ]</button>
+                                        <button type="button" id="select-key-file" class="file-select-btn" data-target="key-file">Выбрать privkey.pem</button>
                                         <input type="file" id="key-file" accept=".pem,.key" class="hidden">
                                         <span id="key-status" class="file-status"></span>
                                     </div>
@@ -274,7 +279,7 @@
                                 <label class="input-label">Transport</label>
                                 <div class="radio-group-inline">
                                     <label class="radio-group">
-                                        <input type="radio" name="transport" value="cupsonline" data-field="openflux.transport">
+                                        <input type="radio" id="transport-cups" name="transport" value="cupsonline" data-field="openflux.transport">
                                         <span class="radio-indicator"></span>
                                         <span class="radio-label">cupsonline</span>
                                     </label>
@@ -599,7 +604,7 @@
             </div>
             <div class="modal-body help-content">
                 <div class="help-step"><b>01</b><div><strong>Подготовьте VPS</strong><span>Ubuntu 22.04/24.04, публичный IP и SSH root/ключ.</span></div></div>
-                <div class="help-step"><b>02</b><div><strong>Настройте домен</strong><span>Для Hysteria выберите поддомен и загрузите fullchain.pem + privkey.pem.</span></div></div>
+                <div class="help-step"><b>02</b><div><strong>Настройте домен</strong><span>Для Hysteria укажите домен, направленный на VPS. bypass может выпустить сертификат автоматически; откройте TCP-порт 80.</span></div></div>
                 <div class="help-step"><b>03</b><div><strong>Нажмите «Развернуть на VPS»</strong><span>Не закрывайте локальное приложение до завершения. Повторный деплой сохраняет ключи клиентов.</span></div></div>
                 <div class="help-step"><b>04</b><div><strong>Добавьте устройство</strong><span>Откройте клиента после деплоя, скопируйте subscription URL или скачайте Xray JSON.</span></div></div>
                 <div class="hint-card warning-hint">После смены XHTTP на TCP / Vision удалите старую подписку и импортируйте новую. Обновление удалённого клиента с уже удалённым токеном не поможет. Для проверки не запускайте одновременно два VPN.</div>
@@ -615,8 +620,8 @@
     </div>
 
     <!-- Toast Container -->
-    <div id="toast-container" class="toast-container"></div>
+    <div id="toast-container" class="toast-container" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=6"></script>
+    <script src="/static/app.js?v=9"></script>
 </body>
 </html>
