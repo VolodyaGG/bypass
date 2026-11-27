@@ -1,0 +1,36 @@
+services:
+  app:
+    image: ${BYPASS_IMAGE:?Set BYPASS_IMAGE to the tested image}
+    restart: unless-stopped
+    environment:
+      VPNFORGE_PUBLIC_DEMO: "true"
+      VPNFORGE_PUBLIC_HOST: ${BYPASS_DOMAIN:?Set BYPASS_DOMAIN}
+      VPNFORGE_DEMO_PROFILE: ${BYPASS_PROFILE:-reviewer}
+      VPNFORGE_DEMO_PASSWORD: ${BYPASS_PASSWORD:?Set BYPASS_PASSWORD}
+      VPNFORGE_ANSIBLE_TIMEOUT: "120"
+    volumes:
+      - app-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    pids_limit: 128
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      BYPASS_DOMAIN: ${BYPASS_DOMAIN}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,11 @@
+*
+!pyproject.toml
+!poetry.lock
+!README.md
+!vpnforge/
+!vpnforge/**
+!ansible/
+!ansible/demo/
+!ansible/demo/**
+**/__pycache__
+**/*.pyc

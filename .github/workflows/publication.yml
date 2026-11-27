@@ -1,0 +1,103 @@
+name: Test and publish
+on:
+  push:
+    branches: [main, feat/idz2-publication-ci-cd]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: publication-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install poetry==2.2.1
+      - run: poetry install --with demo --no-interaction
+      - run: poetry check --lock
+      - run: poetry run pytest -q --disable-warnings
+  image:
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.name.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name
+        id: name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - run: docker build -t bypass-tested .
+      - name: Smoke test the built container
+        env:
+          BYPASS_PASSWORD: smoke-only-password
+        run: |
+          docker run -d --name bypass-smoke -p 127.0.0.1:18000:8000 \
+            -e VPNFORGE_PUBLIC_DEMO=true -e VPNFORGE_PUBLIC_HOST=127.0.0.1 \
+            -e VPNFORGE_DEMO_PASSWORD="$BYPASS_PASSWORD" bypass-tested
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18000/api/health; then break; fi
+            sleep 2
+          done
+          python scripts/smoke.py
+      - name: Container logs
+        if: always()
+        run: docker logs bypass-smoke
+      - name: Publish tested image
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.name.outputs.image }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker tag bypass-tested "$IMAGE"
+          docker push "$IMAGE"
+  deploy:
+    needs: image
+    if: vars.DEPLOY_ENABLED == 'true' && (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    concurrency: bypass-production
+    environment: production
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_KEY: ${{ secrets.SSH_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+      IMAGE: ${{ needs.image.outputs.image }}
+      BYPASS_URL: ${{ vars.BYPASS_URL }}
+      BYPASS_PASSWORD: ${{ secrets.BYPASS_PASSWORD }}
+      BYPASS_PROFILE: ${{ vars.BYPASS_PROFILE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Publish release
+        run: |
+          scp deploy/compose.yaml deploy/Caddyfile "$SSH_USER@$SSH_HOST:/opt/bypass/"
+          ssh "$SSH_USER@$SSH_HOST" bash -s -- "$IMAGE" <<'REMOTE'
+          set -eu
+          cd /opt/bypass
+          export BYPASS_IMAGE="$1"
+          docker compose --env-file .env -f compose.yaml pull
+          docker compose --env-file .env -f compose.yaml up -d --wait --wait-timeout 180
+          sed -i '/^BYPASS_IMAGE=/d' .env
+          printf 'BYPASS_IMAGE=%s\n' "$1" >> .env
+          REMOTE
+      - name: Smoke test public HTTPS
+        run: |
+          case "$BYPASS_URL" in https://*) ;; *) exit 1 ;; esac
+          python scripts/smoke.py
