@@ -12,5 +12,5 @@ RUN useradd --uid 10001 --create-home bypass && mkdir /app/data && chown bypass 
 USER bypass
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s \
- CMD python -c "import os, urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/api/health', headers={'Host': os.environ.get('VPNFORGE_PUBLIC_HOST', 'localhost')}), timeout=3)"
+ CMD python -c "import os, urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/api/health', headers={'Host': os.environ.get('VPNFORGE_PUBLIC_HOST') or os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')}), timeout=3)"
 CMD ["uvicorn", "vpnforge.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
