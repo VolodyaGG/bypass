@@ -16,4 +16,4 @@ services:
       - key: VPNFORGE_DEMO_PASSWORD
         generateValue: true
       - key: VPNFORGE_ANSIBLE_TIMEOUT
-        value: "120"
+        value: "300"
