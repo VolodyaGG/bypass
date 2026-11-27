@@ -6,8 +6,10 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
@@ -198,9 +200,7 @@ def create_app(
         return _error_body(exc.code, exc.message, exc.status)
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_handler(
-        _request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
+    async def _validation_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
         return _error_body("validation_error", str(exc.errors()), 422)
 
     @app.exception_handler(SecretsNotFound)
@@ -249,13 +249,61 @@ def create_app(
 
     auth = LocalAuth(settings.data_dir / "auth")
     password_lock = asyncio.Lock()
+    login_attempts: dict[str, list[float]] = {}
+    if settings.public_demo:
+        password = settings.demo_password.get_secret_value()
+        if not settings.public_host or not 8 <= len(password) <= 128:
+            raise ValueError(
+                "Public demo requires PUBLIC_HOST and DEMO_PASSWORD (8–128 characters)"
+            )
+        if not 2 <= len(settings.demo_profile) <= 40 or not settings.demo_profile.isprintable():
+            raise ValueError("Invalid demo profile")
+        if not auth.configured():
+            initial_session = auth.create_account(settings.demo_profile, password)
+            if initial_session:
+                auth.sign_out(initial_session)
+
+    @app.middleware("http")
+    async def public_demo_boundary(request: Request, call_next):  # type: ignore[no-untyped-def]
+        if settings.public_demo:
+            if request.url.hostname != settings.public_host:
+                return _error_body("invalid_host", "Invalid host", 400)
+            path = request.url.path
+            allowed_api = path in {"/api/health", "/api/deploy/demo"} or bool(
+                re.fullmatch(r"/api/deploy/(stream|cancel)/[a-f0-9]{32}", path)
+            )
+            if path.startswith("/api/") and not allowed_api:
+                return _error_body("demo_only", "Публичная версия поддерживает учебное демо.", 403)
+            if request.method == "POST":
+                try:
+                    too_large = int(request.headers.get("content-length", "0")) > 65536
+                except ValueError:
+                    too_large = True
+                if too_large:
+                    return _error_body("request_too_large", "Request too large", 413)
+            if path == "/login" and request.method == "POST":
+                now = time.monotonic()
+                # Bound memory as well as per-client password hashing work.
+                for key in list(login_attempts):
+                    login_attempts[key] = [t for t in login_attempts[key] if now - t < 60]
+                    if not login_attempts[key]:
+                        del login_attempts[key]
+                key = request.client.host if request.client else "unknown"
+                attempts = login_attempts.setdefault(key, [])
+                if len(attempts) >= 10 or len(login_attempts) > 1000:
+                    return _error_body("rate_limited", "Повторите вход через минуту.", 429)
+                attempts.append(now)
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
 
     def check_origin(request: Request) -> None:
         origin = request.headers.get("origin")
         expected = f"{request.url.scheme}://{request.url.netloc}"
-        if (
-            request.headers.get("sec-fetch-site") == "cross-site"
-            or (origin is not None and origin != expected)
+        if request.headers.get("sec-fetch-site") == "cross-site" or (
+            origin is not None and origin != expected
         ):
             raise ApiError("cross_origin", "Запрос с другого сайта отклонён.", 403)
 
@@ -291,7 +339,7 @@ def create_app(
             return RedirectResponse("/login", status_code=303)
         return templates.TemplateResponse(
             "index.html",
-            {"request": request, "profile": profile},
+            {"request": request, "profile": profile, "public_demo": settings.public_demo},
             headers={"Cache-Control": "no-store"},
         )
 
@@ -322,6 +370,8 @@ def create_app(
             )
 
         async with password_lock:
+            if setup and settings.public_demo:
+                raise ApiError("setup_disabled", "Тестовый профиль уже настроен.", 403)
             if setup:
                 if (
                     request.url.hostname not in {"127.0.0.1", "localhost", "::1"}
@@ -392,7 +442,8 @@ def create_app(
         fqdn = body.fqdn.strip().lower().rstrip(".")
         zone_id = body.zone_id or (
             cf.resolve_zone_id(body.root_domain)
-            if body.root_domain else cf.resolve_zone_for_hostname(fqdn)
+            if body.root_domain
+            else cf.resolve_zone_for_hostname(fqdn)
         )
         record_id = cf.upsert_a_record(zone_id, fqdn, body.ip)
         return {"zone_id": zone_id, "record_id": record_id}
@@ -443,9 +494,7 @@ def create_app(
         return client
 
     @private.delete("/api/clients/{client_id}")
-    async def clients_delete(
-        client_id: str, ip: str = Query(...)
-    ) -> dict[str, bool]:
+    async def clients_delete(client_id: str, ip: str = Query(...)) -> dict[str, bool]:
         ctx.clients.remove_client(ip, client_id)
         return {"ok": True}
 
@@ -537,18 +586,21 @@ def create_app(
 
     @private.post("/api/deploy/demo", status_code=202)
     async def deploy_demo(payload: str = Form(...)) -> dict[str, str]:
+        if settings.public_demo:
+            if any(not job.done.is_set() for job in ctx.jobs.values()):
+                raise ApiError(
+                    "demo_busy", "Демо уже выполняется. Повторите после завершения.", 409
+                )
+            while len(ctx.jobs) >= 100:
+                del ctx.jobs[next(iter(ctx.jobs))]
         try:
             req = DeployRequest.model_validate_json(payload)
         except ValidationError as exc:
-            raise ApiError(
-                "validation_error", "Invalid demo deploy payload", 422
-            ) from exc
+            raise ApiError("validation_error", "Invalid demo deploy payload", 422) from exc
 
         molecule = shutil.which("molecule")
         if molecule is None:
-            raise ApiError(
-                "molecule_not_found", "Install Molecule to run the demo deployment", 503
-            )
+            raise ApiError("molecule_not_found", "Install Molecule to run the demo deployment", 503)
 
         job_id = uuid.uuid4().hex
         job = DeployJob(job_id=job_id)
@@ -729,9 +781,7 @@ async def _run_deploy(
             if req.certificate_source == "upload":
                 assert fullchain is not None and privkey is not None
                 job.emit("log", "validating uploaded certificate")
-                cert_info = cert_validator.validate_cert_bytes(
-                    fullchain, privkey, req.domain
-                )
+                cert_info = cert_validator.validate_cert_bytes(fullchain, privkey, req.domain)
             else:
                 if req.certificate_source == "letsencrypt":
                     job.emit("log", "Let's Encrypt: автоматический выпуск и продление на VPS")
@@ -742,15 +792,15 @@ async def _run_deploy(
             if token:
                 job.emit("log", "upserting Cloudflare A record")
                 cf = ctx.cf_factory(token)
-                secrets_preview = (
-                    ctx.store.load(req.ip) if ctx.store.exists(req.ip) else None
-                )
+                secrets_preview = ctx.store.load(req.ip) if ctx.store.exists(req.ip) else None
                 zone_id = (
                     secrets_preview.cloudflare.zone_id
-                    if secrets_preview and secrets_preview.domain == req.domain else None
+                    if secrets_preview and secrets_preview.domain == req.domain
+                    else None
                 ) or (
                     cf.resolve_zone_id(req.root_domain)
-                    if req.root_domain else cf.resolve_zone_for_hostname(req.domain)
+                    if req.root_domain
+                    else cf.resolve_zone_for_hostname(req.domain)
                 )
                 record_id = cf.upsert_a_record(zone_id, req.domain, req.ip)
                 pending_cf = (zone_id, record_id)
@@ -804,9 +854,7 @@ async def _run_deploy(
             certificate_source=req.certificate_source,
             vps_fullchain_path=req.vps_fullchain_path,
             vps_privkey_path=req.vps_privkey_path,
-            fullchain_b64=inventory_builder.encode_pem_b64(fullchain)
-            if fullchain
-            else None,
+            fullchain_b64=inventory_builder.encode_pem_b64(fullchain) if fullchain else None,
             privkey_b64=inventory_builder.encode_pem_b64(privkey) if privkey else None,
             ssh_password=req.ssh_password,
             xray_config=xray_cfg,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     ansible_timeout: int = Field(default=1800)
 
     cf_api_token: str = Field(default="")
+    public_demo: bool = False
+    demo_profile: str = "reviewer"
+    demo_password: SecretStr = SecretStr("")
+    public_host: str = ""
 
     @property
     def secrets_dir(self) -> Path:

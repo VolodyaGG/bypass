@@ -49,8 +49,9 @@
             <div class="launch-rail">
                 <div class="workspace-mode" role="group" aria-label="Режим запуска">
                     <button type="button" data-deploy-mode="demo" aria-pressed="true">{{ icon('flask') }} Демо</button>
-                    <button type="button" data-deploy-mode="real" aria-pressed="false">{{ icon('server-2') }} На VPS</button>
+                    {% if not public_demo %}<button type="button" data-deploy-mode="real" aria-pressed="false">{{ icon('server-2') }} На VPS</button>{% endif %}
                 </div>
+                {% if public_demo %}<p class="workspace-hint">Учебная версия · общий тестовый профиль · используйте тестовые данные.</p>{% endif %}
                 <p id="mode-description">Molecule проверит конфигурацию на этом компьютере.</p>
                 <button type="button" id="forge-btn" class="btn btn-primary">
                     <span id="deploy-button-label">Запустить демо</span>{{ icon('arrow-up-right') }}
