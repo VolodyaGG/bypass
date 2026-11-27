@@ -251,6 +251,7 @@ def create_app(
     password_lock = asyncio.Lock()
     login_attempts: dict[str, list[float]] = {}
     if settings.public_demo:
+        settings.public_host = settings.public_host or os.environ.get("RENDER_EXTERNAL_HOSTNAME", "")
         password = settings.demo_password.get_secret_value()
         if not settings.public_host or not 8 <= len(password) <= 128:
             raise ValueError(

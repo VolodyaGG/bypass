@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: bypass-demo
+    runtime: docker
+    plan: free
+    region: frankfurt
+    repo: https://github.com/VolodyaGG/bypass
+    branch: feat/idz2-publication-ci-cd
+    autoDeployTrigger: checksPass
+    healthCheckPath: /api/health
+    envVars:
+      - key: VPNFORGE_PUBLIC_DEMO
+        value: "true"
+      - key: VPNFORGE_DEMO_PROFILE
+        value: reviewer
+      - key: VPNFORGE_DEMO_PASSWORD
+        generateValue: true
+      - key: VPNFORGE_ANSIBLE_TIMEOUT
+        value: "120"

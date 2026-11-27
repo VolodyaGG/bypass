@@ -42,7 +42,7 @@ jobs:
         env:
           BYPASS_PASSWORD: smoke-only-password
         run: |
-          docker run -d --name bypass-smoke -p 127.0.0.1:18000:8000 \
+          docker run -d --name bypass-smoke --memory=512m --cpus=1 -p 127.0.0.1:18000:8000 \
             -e VPNFORGE_PUBLIC_DEMO=true -e VPNFORGE_PUBLIC_HOST=127.0.0.1 \
             -e VPNFORGE_DEMO_PASSWORD="$BYPASS_PASSWORD" bypass-tested
           for attempt in $(seq 1 30); do
