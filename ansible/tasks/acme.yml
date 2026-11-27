@@ -1,0 +1,127 @@
+---
+- name: Install Certbot for automatic TLS
+  ansible.builtin.apt:
+    name:
+      - certbot
+      - openssl
+    state: present
+
+- name: Install bypass certificate deploy hook
+  ansible.builtin.copy:
+    src: files/bypass_cert_deploy.py
+    dest: /usr/local/sbin/bypass-cert-deploy
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Resolve certificate domain to the VPS
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import socket, sys
+        def addresses(host):
+            return {r[4][0] for r in socket.getaddrinfo(host, 80, type=socket.SOCK_STREAM)}
+        domain, target = sys.argv[1:]
+        actual, expected = addresses(domain), addresses(target)
+        if not actual.intersection(expected):
+            sys.exit('DNS домена ещё не указывает на VPS. Проверьте записи A/AAAA и отключите проксирование Cloudflare.')
+        print('DNS points to VPS')
+      - "{{ hysteria2.acme_domain }}"
+      - "{{ vpnforge.server_ip }}"
+  register: vpnforge_acme_dns
+  changed_when: false
+  until: vpnforge_acme_dns.rc == 0
+  retries: 12
+  delay: 10
+
+- name: Check for UFW
+  ansible.builtin.stat:
+    path: /usr/sbin/ufw
+  register: vpnforge_ufw_binary
+
+- name: Allow HTTP validation in active UFW
+  when: vpnforge_ufw_binary.stat.exists
+  block:
+    - name: Read UFW status
+      ansible.builtin.command: /usr/sbin/ufw status
+      environment:
+        LC_ALL: C
+      changed_when: false
+      register: vpnforge_ufw_status
+
+    - name: Allow inbound TCP 80 for certificate issuance and renewals
+      ansible.builtin.command: /usr/sbin/ufw allow 80/tcp
+      environment:
+        LC_ALL: C
+      register: vpnforge_ufw_http
+      changed_when: "'Rule added' in vpnforge_ufw_http.stdout or 'Rules updated' in vpnforge_ufw_http.stdout"
+      when: "'Status: active' in vpnforge_ufw_status.stdout"
+
+- name: Check HTTP challenge port
+  ansible.builtin.command:
+    argv: [ss, -H, -ltn, 'sport = :80']
+  changed_when: false
+  register: vpnforge_acme_listener
+
+- name: Require a free HTTP challenge port
+  ansible.builtin.assert:
+    that: vpnforge_acme_listener.stdout | trim == ''
+    fail_msg: "TCP-порт 80 занят. Освободите его для автоматического выпуска и продления либо выберите свой сертификат."
+
+- name: Issue or reuse bypass certificate
+  block:
+    - name: Request Let's Encrypt certificate
+      ansible.builtin.command:
+        argv:
+          - certbot
+          - certonly
+          - --standalone
+          - --preferred-challenges
+          - http
+          - --http-01-port
+          - '80'
+          - --non-interactive
+          - --agree-tos
+          - --register-unsafely-without-email
+          - --keep-until-expiring
+          - --cert-name
+          - "bypass-{{ hysteria2.acme_domain }}"
+          - --domain
+          - "{{ hysteria2.acme_domain }}"
+          - --deploy-hook
+          - /usr/local/sbin/bypass-cert-deploy
+          - --server
+          - https://acme-v02.api.letsencrypt.org/directory
+      # Changes are detected by the deploy hook's content comparison below.
+      changed_when: false
+  rescue:
+    - name: Explain certificate issuance failure
+      ansible.builtin.fail:
+        msg: >-
+          Let's Encrypt не смог выпустить сертификат. Проверьте записи A/AAAA,
+          отсутствие проксирования Cloudflare и доступность TCP-порта 80 из интернета,
+          включая firewall провайдера VPS. {{ ansible_failed_result.stderr | default('') }}
+
+- name: Configure active automatic certificate after successful issuance
+  ansible.builtin.copy:
+    content: "{{ {'domain': hysteria2.acme_domain, 'runtime': vpnforge.runtime} | to_nice_json }}"
+    dest: /etc/vpnforge/acme.json
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Synchronize active certificate and restart TLS consumers if needed
+  ansible.builtin.command: /usr/local/sbin/bypass-cert-deploy
+  environment:
+    RENEWED_LINEAGE: "/etc/letsencrypt/live/bypass-{{ hysteria2.acme_domain }}"
+  register: vpnforge_acme_deploy
+  changed_when: "'Certificate deployed' in vpnforge_acme_deploy.stdout"
+
+- name: Enable unattended certificate renewal
+  ansible.builtin.systemd:
+    name: certbot.timer
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -1,0 +1,15 @@
+[Unit]
+Description=bypass subscription server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vpnforge/sub
+Environment=VPNFORGE_CLIENTS_FILE={{ vpnforge.clients_json_path }}
+ExecStart=/opt/vpnforge/sub/.venv/bin/uvicorn app:app --host 0.0.0.0 --port {{ vpnforge.subscription_port }}{{ ' --ssl-certfile /etc/vpnforge/certs/fullchain.pem --ssl-keyfile /etc/vpnforge/certs/privkey.pem' if vpnforge.subscription_scheme == 'https' else '' }}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

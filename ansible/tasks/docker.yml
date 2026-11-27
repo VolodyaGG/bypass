@@ -1,0 +1,23 @@
+---
+- name: Install docker.io and compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+    state: present
+    update_cache: true
+
+- name: Ensure docker is running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Render docker-compose.yml
+  ansible.builtin.template:
+    src: templates/docker-compose.yml.j2
+    dest: /opt/vpnforge/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart compose

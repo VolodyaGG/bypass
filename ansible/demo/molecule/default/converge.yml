@@ -1,0 +1,18 @@
+---
+- name: Simulate a VPN deployment locally
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - "{{ playbook_dir }}/../../demo-input.json"
+  tasks:
+    - name: Validate the demo target and protocol selection
+      ansible.builtin.assert:
+        that:
+          - demo_spec.target | length > 0
+          - demo_spec.protocols | length > 0
+
+    - name: Write the simulated VPN deployment manifest
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/../../demo-deployment.json"
+        content: "{{ demo_spec | combine({'status': 'simulated'}) | to_nice_json }}"
+        mode: "0600"

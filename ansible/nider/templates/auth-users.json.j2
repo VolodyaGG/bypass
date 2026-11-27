@@ -1,0 +1,4 @@
+{
+  "legacy": {{ (hy_auth | hash('sha256')) | to_json }}{% for username, password in (hy_users | default({})).items() %},
+  {{ username | to_json }}: {{ ((username ~ ':' ~ password) | hash('sha256')) | to_json }}{% endfor %}
+}

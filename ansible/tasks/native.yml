@@ -1,0 +1,7 @@
+---
+# Native binaries. Service units are installed by protocol task files.
+
+- name: Install unzip if missing
+  ansible.builtin.apt:
+    name: unzip
+    state: present

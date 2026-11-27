@@ -1,0 +1,12 @@
+---
+# Example group_vars (runtime file is generated per deploy and deleted).
+vpnforge:
+  runtime: native
+  server_ip: 1.2.3.4
+  server_domain: node1.example.com
+  clients_json_path: /opt/vpnforge/sub/clients.json
+
+protocols:
+  hysteria2: false
+  vless_reality: true
+  openflux: false

@@ -1,0 +1,29 @@
+---
+- name: Install authentication command preserving legacy credentials
+  ansible.builtin.copy:
+    src: '{{ playbook_dir }}/templates/authenticate.py'
+    dest: /usr/local/lib/hysteria2-nider/authenticate
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart isolated Hysteria
+- name: Install hashed authentication records
+  ansible.builtin.template:
+    src: '{{ playbook_dir }}/templates/auth-users.json.j2'
+    dest: /etc/hysteria2-nider/auth-users.json
+    owner: root
+    group: hysteria-nider
+    mode: '0640'
+  no_log: true
+- name: Check authentication command as service account
+  ansible.builtin.command:
+    argv:
+      - /usr/local/lib/hysteria2-nider/authenticate
+      - 127.0.0.1:12345
+      - '{{ hy_auth }}'
+      - '0'
+  become_user: hysteria-nider
+  register: legacy_auth_test
+  changed_when: false
+  failed_when: legacy_auth_test.rc != 0 or legacy_auth_test.stdout != 'legacy'
+  no_log: true

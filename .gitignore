@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# secrets — никогда
+data/secrets/
+data/runs/
+.env
+
+# runtime
+*.log
+# Local authentication database
+data/auth/

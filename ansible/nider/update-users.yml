@@ -1,0 +1,28 @@
+---
+- name: Update Hysteria users while preserving legacy access
+  hosts: hysteria
+  become: true
+  gather_facts: false
+  vars_files:
+    - secrets.yml
+  handlers:
+    - name: Restart isolated Hysteria
+      ansible.builtin.systemd_service:
+        name: hysteria2-nider
+        state: restarted
+  tasks:
+    - name: Install authentication records and command
+      ansible.builtin.import_tasks: tasks/auth.yml
+    - name: Update only authentication in existing server configuration
+      ansible.builtin.replace:
+        path: /etc/hysteria2-nider/server.yaml
+        regexp: '(?ms)^auth:\n.*?(?=^\S|\Z)'
+        replace: "auth:\n  type: command\n  command: /usr/local/lib/hysteria2-nider/authenticate\n"
+        backup: true
+      no_log: true
+      notify: Restart isolated Hysteria
+    - name: Apply authentication updates
+      ansible.builtin.meta: flush_handlers
+    - name: Verify service active
+      ansible.builtin.command: systemctl is-active hysteria2-nider
+      changed_when: false

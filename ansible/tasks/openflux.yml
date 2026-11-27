@@ -1,0 +1,97 @@
+---
+# OpenFlux is installed as a standalone native service even when the rest of
+# bypass uses Docker. Official release binaries avoid requiring the rapidly
+# moving Go toolchain on the VPS.
+
+- name: Select OpenFlux release asset
+  ansible.builtin.set_fact:
+    openflux_release_version: "0.0.3"
+    openflux_release_arch: >-
+      {{ {'x86_64': 'amd64', 'aarch64': 'arm64', 'armv7l': 'arm'}
+         .get(ansible_facts['architecture'], '') }}
+    openflux_release_sha256: >-
+      {{ {
+        'x86_64': '196422337f60527d2b4da5bf84274e7ef4299c35bd84eb1296af1535b15aebcc',
+        'aarch64': 'b02c243b64aedf7c617865857a650803414b22e1d7ed40c22ea95fbb499aa411',
+        'armv7l': '9dfb1b7928f7f3cf508880fe072cb8fb8e3c585c8cf90b6b6119c7b5db966928'
+      }.get(ansible_facts['architecture'], '') }}
+
+- name: Reject unsupported OpenFlux architecture
+  ansible.builtin.assert:
+    that:
+      - openflux_release_arch | length > 0
+      - openflux_release_sha256 | length > 0
+    fail_msg: >-
+      OpenFlux does not publish a Linux binary for
+      {{ ansible_facts['architecture'] }}
+
+- name: Install OpenFlux release binary
+  ansible.builtin.get_url:
+    url: "https://github.com/p1neappleXpress/OpenFlux/releases/download/{{ openflux_release_version }}/openflux-linux-{{ openflux_release_arch }}"
+    dest: /usr/local/bin/openflux
+    owner: root
+    group: root
+    mode: "0755"
+    checksum: "sha256:{{ openflux_release_sha256 }}"
+  notify: restart openflux
+
+- name: Ensure /etc/vpnforge exists
+  ansible.builtin.file:
+    path: /etc/vpnforge
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write OpenFlux encryption key
+  ansible.builtin.copy:
+    content: "{{ openflux.encryption_key }}\n"
+    dest: /etc/vpnforge/openflux.key
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - openflux.encryption_key is defined
+    - openflux.encryption_key | length > 0
+  no_log: true
+  notify: restart openflux
+
+- name: Install OpenFlux systemd unit
+  ansible.builtin.template:
+    src: templates/vpnforge-openflux.service.j2
+    dest: /etc/systemd/system/vpnforge-openflux.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: openflux_unit
+  notify:
+    - reload systemd
+    - restart openflux
+
+- name: Enable and start OpenFlux
+  ansible.builtin.systemd:
+    name: vpnforge-openflux
+    enabled: true
+    state: started
+    daemon_reload: "{{ openflux_unit.changed }}"
+
+- name: Wait for OpenFlux to emit a session marker
+  when: openflux.transport == 'cupsonline'
+  ansible.builtin.shell: |
+    for i in $(seq 1 15); do
+      if journalctl -u vpnforge-openflux -n 200 --no-pager \
+          | grep -q "COPY THIS TO CLIENT"; then
+        exit 0
+      fi
+      sleep 2
+    done
+  changed_when: false
+
+- name: Dump OpenFlux logs for session pickup
+  ansible.builtin.command: journalctl -u vpnforge-openflux -n 200 --no-pager
+  register: openflux_logs
+  changed_when: false
+
+- name: Print OpenFlux logs
+  ansible.builtin.debug:
+    msg: "{{ openflux_logs.stdout_lines }}"

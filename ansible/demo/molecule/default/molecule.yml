@@ -1,0 +1,15 @@
+---
+ansible:
+  executor:
+    backend: ansible-playbook
+    args:
+      ansible_playbook:
+        - --inventory=${MOLECULE_SCENARIO_DIRECTORY}/inventory.yml
+  playbooks:
+    converge: converge.yml
+    verify: verify.yml
+scenario:
+  test_sequence:
+    - converge
+    - idempotence
+    - verify
